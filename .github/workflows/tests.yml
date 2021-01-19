@@ -1,0 +1,36 @@
+name: Tests
+on: [push, pull_request]
+
+jobs:
+  build:
+    name: Run Unit Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.6, 3.7, 3.8, 3.9]
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-cov
+
+      - name: Install package
+        run: |
+          pip install .
+
+      - name: Run unit tests
+        run: |
+          pytest --verbose --color=yes --cov=modelscope --cov-append tests/unit
+
+      - name: Upload Coverage to Codecov
+        uses: codecov/codecov-action@v1
+        with:
+          fail_ci_if_error: true
