@@ -4,6 +4,7 @@ from typing import Tuple, Iterator, Generator
 
 import torch
 import torch.nn as nn
+from torch.utils.hooks import RemovableHandle
 
 
 def module_walker(module: Tuple[str, nn.Module], parents: bool = True) -> Iterator[Tuple[str, nn.Module]]:
@@ -30,3 +31,14 @@ def module_walker(module: Tuple[str, nn.Module], parents: bool = True) -> Iterat
 
     elif submodule is None and not parents:
         yield module
+
+
+def register_forward_hook(hook, module: nn.Module, module_ids: set = None) -> RemovableHandle:
+    """Registers a forward hook using module's internal method.
+    """
+    id_ = id(module)
+    if id_ not in module_ids:
+        module_ids.add(id_)
+        # Register forward hook here
+        handle = module.register_forward_hook(hook)
+        return handle
