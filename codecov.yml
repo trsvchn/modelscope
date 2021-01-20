@@ -1,2 +1,4 @@
+fixes:
+  - "/home/runner/work/modelscope/::"
 ignore:
   - "tests/"
