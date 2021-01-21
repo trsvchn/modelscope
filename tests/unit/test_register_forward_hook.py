@@ -10,9 +10,7 @@ def test_register_forward_hook_unique():
     assert set() == module_ids
 
     handle = register_forward_hook(hook, module, module_ids)
-    assert 0 == handle.id
-    assert 1 == handle.next_id
-    assert hook == handle.hooks_dict_ref()[0]
+    assert hook == list(handle.hooks_dict_ref().values())[0]
     assert {id(module)} == module_ids
 
 

@@ -1,6 +1,6 @@
 """Model Summary.
 """
-from typing import Tuple, Iterator, Generator
+from typing import Tuple, List, Iterator, Set, Generator, Callable
 
 import torch
 import torch.nn as nn
@@ -11,7 +11,7 @@ def module_walker(module: Tuple[str, nn.Module], parents: bool = True) -> Iterat
     """Recursive model walker. By default, it returns parents and children modules.
     """
     if parents:
-        # Yield module anyway, when we want parents modules as well
+        # Yield module anyway, when we need parents as well
         yield module
 
     # Get module submodules (children)
@@ -33,12 +33,42 @@ def module_walker(module: Tuple[str, nn.Module], parents: bool = True) -> Iterat
         yield module
 
 
-def register_forward_hook(hook, module: nn.Module, module_ids: set = None) -> RemovableHandle:
+def register_forward_hook(hook: Callable, module: nn.Module, module_ids: Set[int]) -> RemovableHandle:
     """Registers a forward hook using module's internal method.
     """
-    id_ = id(module)
+    id_: int = id(module)
     if id_ not in module_ids:
         module_ids.add(id_)
         # Register forward hook here
         handle = module.register_forward_hook(hook)
         return handle
+
+
+def prepare_forward_hook(module_name: str, results: List[Tuple[str, str, torch.Size, None]]) -> Callable:
+    """Prepares forward hook.
+    """
+
+    def hook(module, inp, out):
+        """Get output sizes and module parameters.
+        """
+        # Get output size
+        out_size = out.size()
+        # Get params
+        params = None
+        # Export info
+        results.append((module_name, module._get_name(), out_size, params))
+
+    return hook
+
+
+def register_wrapped_forward_hook(
+        module_name: str,
+        module: nn.Module,
+        module_ids: Set[int],
+        results: List[Tuple[str, str, torch.Size, None]],
+) -> RemovableHandle:
+    """Prepare and register forward hook.
+    """
+    hook = prepare_forward_hook(module_name, results)
+    handle = register_forward_hook(hook, module, module_ids)
+    return handle
