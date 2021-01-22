@@ -10,10 +10,6 @@ from torch.utils.hooks import RemovableHandle
 def module_walker(module: Tuple[str, nn.Module], parents: bool = True) -> Iterator[Tuple[str, nn.Module]]:
     """Recursive model walker. By default, it returns parents and children modules.
     """
-    if parents:
-        # Yield module anyway, when we need parents as well
-        yield module
-
     # Get module submodules (children)
     submodules: Generator = module[-1].named_children()
     # Trying to get the first submodule
@@ -21,6 +17,10 @@ def module_walker(module: Tuple[str, nn.Module], parents: bool = True) -> Iterat
 
     # If possible go deeper
     if submodule is not None:
+        if parents:
+            # Yield module anyway, when we need parents as well
+            yield module
+
         # First submodule is already here
         yield from module_walker(submodule, parents=parents)
         # Next submodules
@@ -29,7 +29,7 @@ def module_walker(module: Tuple[str, nn.Module], parents: bool = True) -> Iterat
             if m:
                 yield from module_walker(m, parents=parents)
 
-    elif submodule is None and not parents:
+    elif submodule is None:
         yield module
 
 
