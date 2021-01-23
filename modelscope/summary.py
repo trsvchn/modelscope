@@ -1,5 +1,6 @@
 """Model Summary.
 """
+from collections import namedtuple
 from typing import Tuple, List, Iterator, Set, Generator, Callable
 
 import torch
@@ -7,7 +8,10 @@ import torch.nn as nn
 from torch.utils.hooks import RemovableHandle
 
 
-def module_walker(module: Tuple[str, nn.Module], parents: bool = True) -> Iterator[Tuple[str, nn.Module]]:
+Module = namedtuple("Module", "name obj")
+
+
+def module_walker(module: Tuple[str, nn.Module], parents: bool = True) -> Iterator[Module]:
     """Recursive model walker. By default, it returns parents and children modules.
     """
     # Get module submodules (children)
@@ -19,7 +23,7 @@ def module_walker(module: Tuple[str, nn.Module], parents: bool = True) -> Iterat
     if submodule is not None:
         if parents:
             # Yield module anyway, when we need parents as well
-            yield module
+            yield Module(*module)
 
         # First submodule is already here
         yield from module_walker(submodule, parents=parents)
@@ -30,7 +34,7 @@ def module_walker(module: Tuple[str, nn.Module], parents: bool = True) -> Iterat
                 yield from module_walker(m, parents=parents)
 
     elif submodule is None:
-        yield module
+        yield Module(*module)
 
 
 def register_forward_hook(hook: Callable, module: nn.Module, module_ids: Set[int]) -> RemovableHandle:
@@ -62,13 +66,12 @@ def prepare_forward_hook(module_name: str, results: List[Tuple[str, str, torch.S
 
 
 def register_wrapped_forward_hook(
-        module_name: str,
-        module: nn.Module,
+        module: Module,
         module_ids: Set[int],
         results: List[Tuple[str, str, torch.Size, None]],
 ) -> RemovableHandle:
     """Prepare and register forward hook.
     """
-    hook = prepare_forward_hook(module_name, results)
-    handle = register_forward_hook(hook, module, module_ids)
+    hook = prepare_forward_hook(module.name, results)
+    handle = register_forward_hook(hook, module.obj, module_ids)
     return handle
