@@ -9,9 +9,13 @@ from torch.utils.hooks import RemovableHandle
 
 
 Module = namedtuple("Module", "name obj")
+Result = namedtuple("Result", "name module out_size num_params")
 
 
-def module_walker(module: Tuple[str, nn.Module], parents: bool = True) -> Iterator[Module]:
+def module_walker(
+        module: Tuple[str, nn.Module],
+        parents: bool = True,
+) -> Iterator[Module]:
     """Recursive model walker. By default, it returns parents and children modules.
     """
     # Get module submodules (children)
@@ -37,7 +41,11 @@ def module_walker(module: Tuple[str, nn.Module], parents: bool = True) -> Iterat
         yield Module(*module)
 
 
-def register_forward_hook(hook: Callable, module: nn.Module, module_ids: Set[int]) -> RemovableHandle:
+def register_forward_hook(
+        hook: Callable,
+        module: nn.Module,
+        module_ids: Set[int],
+) -> RemovableHandle:
     """Registers a forward hook using module's internal method.
     """
     id_: int = id(module)
@@ -48,7 +56,7 @@ def register_forward_hook(hook: Callable, module: nn.Module, module_ids: Set[int
         return handle
 
 
-def prepare_forward_hook(module_name: str, results: List[Tuple[str, str, torch.Size, None]]) -> Callable:
+def prepare_forward_hook(module_name: str, results: List[Result]) -> Callable:
     """Prepares forward hook.
     """
 
@@ -60,7 +68,8 @@ def prepare_forward_hook(module_name: str, results: List[Tuple[str, str, torch.S
         # Get params
         params = None
         # Export info
-        results.append((module_name, module._get_name(), out_size, params))
+        result = Result(module_name, module._get_name(), out_size, params)
+        results.append(result)
 
     return hook
 
@@ -68,7 +77,7 @@ def prepare_forward_hook(module_name: str, results: List[Tuple[str, str, torch.S
 def register_wrapped_forward_hook(
         module: Module,
         module_ids: Set[int],
-        results: List[Tuple[str, str, torch.Size, None]],
+        results: List[Result],
 ) -> RemovableHandle:
     """Prepare and register forward hook.
     """
