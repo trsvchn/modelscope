@@ -24,7 +24,7 @@ def test_forward_hook():
     inp = torch.randn(1, 2)
     out = torch.randn(1, 1)
     expected = (
-        Result("fc", "Linear", torch.Size([1, 1]), None),
+        Result("fc", "Linear", torch.Size([1, 1]), (3, 0)),
     )
     hook(module, inp, out)
     assert expected == tuple(results)

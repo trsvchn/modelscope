@@ -1,6 +1,8 @@
 """Model Summary.
 """
 from collections import namedtuple
+from functools import reduce
+from itertools import chain, groupby
 from typing import Tuple, List, Iterator, Set, Generator, Callable
 
 import torch
@@ -66,7 +68,7 @@ def prepare_forward_hook(module_name: str, results: List[Result]) -> Callable:
         # Get output size
         out_size = out.size()
         # Get params
-        params = None
+        params = get_num_params(module)
         # Export info
         result = Result(module_name, module._get_name(), out_size, params)
         results.append(result)
@@ -84,3 +86,37 @@ def register_wrapped_forward_hook(
     hook = prepare_forward_hook(module.name, results)
     handle = register_forward_hook(hook, module.obj, module_ids)
     return handle
+
+
+def get_num_params(module: nn.Module) -> Tuple[int, int]:
+    """Counts parameters of the module (trainable, non-trainable).
+    """
+    try:
+        # Get params
+        params = module.parameters()
+        # Get the first one
+        param = next(params, None)
+        # Module contains params
+        if param is not None:
+            params = chain(param, params)
+            # Count number of elements of Parameters
+            num_params = map(lambda p: (p.requires_grad, p.numel()), params)
+            # Group by trainable, non-trainable
+            num_params_grouped = groupby(num_params, lambda p: p[0])
+            # Count total number for each group
+            num_params = map(
+                lambda kg: {kg[0]: reduce(torch.add, map(lambda group: group[-1], kg[1]), torch.zeros(1))},
+                num_params_grouped
+            )
+            # Convert to dict
+            num_params_dict = {[*p.keys()][0]: int([*p.values()][0].item()) for p in num_params}
+            # Final unpack
+            num_train_params = num_params_dict.get(True, 0)
+            num_non_train_params = num_params_dict.get(False, 0)
+            return num_train_params, num_non_train_params
+        else:
+            # If params empty
+            return 0, 0
+    except AttributeError:
+        # No params at all
+        return 0, 0
