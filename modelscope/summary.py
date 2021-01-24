@@ -3,7 +3,7 @@
 from collections import namedtuple
 from functools import reduce
 from itertools import chain, groupby
-from typing import Tuple, List, Iterator, Set, Generator, Callable
+from typing import Tuple, List, Set, Generator, Callable, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -17,7 +17,7 @@ Result = namedtuple("Result", "name module out_size num_params")
 def module_walker(
         module: Tuple[str, nn.Module],
         parents: bool = True,
-) -> Iterator[Module]:
+) -> Generator[Module, None, None]:
     """Recursive model walker. By default, it returns parents and children modules.
     """
     # Get module submodules (children)
@@ -66,7 +66,7 @@ def prepare_forward_hook(module_name: str, results: List[Result]) -> Callable:
         """Get output sizes and module parameters.
         """
         # Get output size
-        out_size = out.size()
+        out_size = get_size(out)
         # Get params
         params = get_num_params(module)
         # Export info
@@ -86,6 +86,24 @@ def register_wrapped_forward_hook(
     hook = prepare_forward_hook(module.name, results)
     handle = register_forward_hook(hook, module.obj, module_ids)
     return handle
+
+
+def get_size(obj) -> Optional[Union[torch.Size, List[torch.Size]]]:
+    """Get size of input/output (if possible).
+    """
+    try:
+        # Solo tensor
+        out = obj.size()
+    except AttributeError:
+        # Multiple
+        if isinstance(obj, (tuple, list)):
+            out = []
+            for o in obj:
+                out.append(get_size(o))
+        # Something else is just None (for now)
+        else:
+            out = None
+    return out
 
 
 def get_num_params(module: nn.Module) -> Tuple[int, int]:

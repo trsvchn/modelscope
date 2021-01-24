@@ -27,4 +27,4 @@ def test_forward_hook():
         Result("fc", "Linear", torch.Size([1, 1]), (3, 0)),
     )
     hook(module, inp, out)
-    assert expected == tuple(results)
+    assert tuple(results) == expected
