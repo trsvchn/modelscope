@@ -5,7 +5,7 @@ from modelscope import Module, register_wrapped_forward_hook
 
 
 def test_register_wrapped_forward_hook():
-    module = Module("module", nn.Module())
+    module = Module("module", nn.Module(), parent="", container=False)
     module_ids = set()
     results = []
     handle = register_wrapped_forward_hook(module, module_ids, results)

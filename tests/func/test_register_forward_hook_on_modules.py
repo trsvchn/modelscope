@@ -10,7 +10,7 @@ def test_register_hook_on_model1():
     module_ids = set()
     results = []
 
-    modules = module_walker(model, parents=False)
+    modules = module_walker(model, yield_parents=False)
     register_wrapped_forward_hook_ = partial(
         register_wrapped_forward_hook,
         module_ids=module_ids,
@@ -31,7 +31,7 @@ def test_register_hook_on_model2():
     module_ids = set()
     results = []
 
-    modules = module_walker(model, parents=False)
+    modules = module_walker(model, yield_parents=False)
     register_wrapped_forward_hook_ = partial(
         register_wrapped_forward_hook,
         module_ids=module_ids,
@@ -52,7 +52,7 @@ def test_register_hook_on_model3():
     module_ids = set()
     results = []
 
-    modules = module_walker(model, parents=False)
+    modules = module_walker(model, yield_parents=False)
     register_wrapped_forward_hook_ = partial(
         register_wrapped_forward_hook,
         module_ids=module_ids,
@@ -73,7 +73,7 @@ def test_register_hook_on_model4():
     module_ids = set()
     results = []
 
-    modules = module_walker(model, parents=False)
+    modules = module_walker(model, yield_parents=False)
     register_wrapped_forward_hook_ = partial(
         register_wrapped_forward_hook,
         module_ids=module_ids,

@@ -10,16 +10,18 @@ import torch.nn as nn
 from torch.utils.hooks import RemovableHandle
 
 
-Module = namedtuple("Module", "name obj")
+Module = namedtuple("Module", "name obj parent container")
 Result = namedtuple("Result", "name module out_size num_params")
 
 
 def module_walker(
         module: Tuple[str, nn.Module],
-        parents: bool = True,
+        yield_parents: bool = True,
+        parent=None,
 ) -> Generator[Module, None, None]:
     """Recursive model walker. By default, it returns parents and children modules.
     """
+    parent = parent or ""
     # Get module submodules (children)
     submodules: Generator = module[-1].named_children()
     # Trying to get the first submodule
@@ -27,20 +29,21 @@ def module_walker(
 
     # If possible go deeper
     if submodule is not None:
-        if parents:
+        if yield_parents:
             # Yield module anyway, when we need parents as well
-            yield Module(*module)
+            yield Module(*module, parent=parent, container=True)
 
         # First submodule is already here
-        yield from module_walker(submodule, parents=parents)
+        parent = ".".join([parent, module[0]])
+        yield from module_walker(submodule, yield_parents=yield_parents, parent=parent)
         # Next submodules
         for m in submodules:
             # If there is more than one submodule
             if m:
-                yield from module_walker(m, parents=parents)
+                yield from module_walker(m, yield_parents=yield_parents, parent=parent)
 
     elif submodule is None:
-        yield Module(*module)
+        yield Module(*module, parent=parent, container=False)
 
 
 def register_forward_hook(
@@ -88,7 +91,7 @@ def register_wrapped_forward_hook(
     return handle
 
 
-def get_size(obj) -> Optional[Union[torch.Size, List[torch.Size]]]:
+def get_size(obj) -> Optional[Union[torch.Size, List[Optional[torch.Size]]]]:
     """Get size of input/output (if possible).
     """
     try:
