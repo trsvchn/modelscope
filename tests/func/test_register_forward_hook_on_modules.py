@@ -1,7 +1,8 @@
 from functools import partial
 
 from ..conftest import Model1, Model2, Model3, Model4
-from modelscope import module_walker, register_wrapped_forward_hook
+from modelscope.core import module_walker
+from modelscope.hooks import register_wrapped_forward_hook
 
 
 def test_register_hook_on_model1():

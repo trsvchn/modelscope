@@ -1,5 +1,5 @@
 from ..conftest import Model1, Model2, Model3, Model4
-from modelscope import Module, module_walker
+from modelscope.core import Module, module_walker
 
 
 def test_model1_w_parents():

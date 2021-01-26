@@ -3,7 +3,8 @@ from types import FunctionType
 import torch
 import torch.nn as nn
 
-from modelscope import Result, prepare_forward_hook
+from modelscope.core import Result
+from modelscope.hooks import prepare_forward_hook
 
 
 def test_prepare_forward_hook_return():

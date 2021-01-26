@@ -1,6 +1,6 @@
 import torch.nn as nn
 
-from modelscope import register_forward_hook
+from modelscope.hooks import register_forward_hook
 
 
 def test_register_forward_hook_unique():

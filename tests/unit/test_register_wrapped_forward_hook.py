@@ -1,7 +1,8 @@
 import torch.nn as nn
 from torch.utils.hooks import RemovableHandle
 
-from modelscope import Module, register_wrapped_forward_hook
+from modelscope.core import Module
+from modelscope.hooks import register_wrapped_forward_hook
 
 
 def test_register_wrapped_forward_hook():

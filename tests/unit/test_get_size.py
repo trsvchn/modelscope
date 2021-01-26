@@ -1,5 +1,3 @@
-import pytest
-
 import torch
 from modelscope import get_size
 
