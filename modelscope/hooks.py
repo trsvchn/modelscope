@@ -1,12 +1,11 @@
 """Model hooks, handles etc.
 """
-from typing import List, Set, Callable
+from typing import List, Set, Tuple, Callable, Generator, Optional
 
 import torch.nn as nn
 from torch.utils.hooks import RemovableHandle
 
-from .core import Result, Module
-from .summary import get_size, get_num_params
+from .core import Module, Handle, HookOutput
 
 
 def register_forward_hook(
@@ -24,20 +23,34 @@ def register_forward_hook(
         return handle
 
 
-def prepare_forward_hook(module_name: str, results: List[Result]) -> Callable:
+def prepare_pre_forward_hook(
+        module_names: List[str],
+        module_parents: List[str],
+        is_parent: bool,
+        results: Generator[List[str], Optional[HookOutput], None]) -> Callable:
+    """Prepares pre forward hook.
+    """
+
+    def hook(module, inp):
+        # Export info
+        output = HookOutput("pre_forward", module_names, module_parents, is_parent, module, inp, None)
+        results.send(output)
+
+    return hook
+
+
+def prepare_forward_hook(
+        module_names: List[str],
+        module_parents: List[str],
+        is_parent: bool,
+        results: Generator[List[str], Optional[HookOutput], None]) -> Callable:
     """Prepares forward hook.
     """
 
     def hook(module, inp, out):
-        """Get output sizes and module parameters.
-        """
-        # Get output size
-        out_size = get_size(out)
-        # Get params
-        params = get_num_params(module)
         # Export info
-        result = Result(module_name, module._get_name(), out_size, params)
-        results.append(result)
+        output = HookOutput("forward", module_names, module_parents, is_parent, module, inp, out)
+        results.send(output)
 
     return hook
 
@@ -45,10 +58,65 @@ def prepare_forward_hook(module_name: str, results: List[Result]) -> Callable:
 def register_wrapped_forward_hook(
         module: Module,
         module_ids: Set[int],
-        results: List[Result],
+        results: Generator[List[str], Optional[HookOutput], None],
 ) -> RemovableHandle:
     """Prepare and register forward hook.
     """
-    hook = prepare_forward_hook(module.name, results)
+    hook = prepare_forward_hook(module.name, module.parent, module.is_parent, results)
     handle = register_forward_hook(hook, module.obj, module_ids)
     return handle
+
+
+def prepare_handles(modules: Generator[Module, None, None]) -> Tuple[dict, dict]:
+    """Experimental function to handle cases when the same module
+    is reused in multiple places under different names. (See Model4 from tests/conf.py.)
+    """
+    ids_pre_forward = set()
+    handles_pre_forward = {}
+
+    ids_forward = set()
+    handles_forward = {}
+
+    # Iterate over modules
+    for m in modules:
+        module_id = id(m.obj)
+
+        for type_, ids_, handles in (
+                ("_forward_pre_hooks", ids_pre_forward, handles_pre_forward),
+                ("_forward_hooks", ids_forward, handles_forward),
+        ):
+            if module_id not in ids_:
+                # Create a handle for a module
+                handle = RemovableHandle(getattr(m.obj, type_))
+                # Store handle in a dict
+                handles[module_id] = Handle(handle, m.obj, [m.name], [m.parent], m.is_parent)
+                # Update ids
+                ids_.add(module_id)
+            else:
+                # If Module already registered append other name and parent
+                handles[module_id].names.append(m.name)
+                handles[module_id].parents.append(m.parent)
+
+    return handles_pre_forward, handles_forward
+
+
+def register_forward_hooks(handles, results):
+    """Registers forward hook on modules.
+    """
+    for handle in handles.values():
+        id_ = handle.obj.id
+        names = handle.names
+        parents = handle.parents
+        is_parent = handle.is_parent
+        handle.module._forward_hooks[id_] = prepare_forward_hook(names, parents, is_parent, results)
+
+
+def register_pre_forward_hooks(handles, results):
+    """Registers pre-forward hook on modules.
+    """
+    for handle in handles.values():
+        id_ = handle.obj.id
+        names = handle.names
+        parents = handle.parents
+        is_parent = handle.is_parent
+        handle.module._forward_pre_hooks[id_] = prepare_pre_forward_hook(names, parents, is_parent, results)
