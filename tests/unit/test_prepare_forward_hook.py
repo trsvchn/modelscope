@@ -35,7 +35,7 @@ def test_forward_hook():
     inp = torch.randn(1, 2)
     out = torch.randn(1, 1)
     expected = [
-        Result("forward", ["fc"], [""], False, "Linear", "[1, 1]", (3, 0)),
+        Result("forward", ["fc"], [""], False, "Linear", torch.Size([1, 1]), (3, 0)),
         Result("final", None, None, None, None, None, (3, 3, 0)),
     ]
     hook(module, inp, out)

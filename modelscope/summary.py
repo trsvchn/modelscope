@@ -94,7 +94,6 @@ def result_holder() -> Generator[List[str], Optional[HookOutput], None]:
                         # Forward hooks
                         module_type = hook_output.module._get_name()
                         out_size = get_size(hook_output.out)
-                        out_size = f"[{', '.join(map(str, out_size))}]"
 
                         num_params = get_num_params(hook_output.module)
                         num_train_params, num_non_train_params = num_params
