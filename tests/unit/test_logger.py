@@ -36,7 +36,7 @@ def test_result_holder_close():
 def test_result_holder_send_forward():
     main_logger = logger()
     next(main_logger)
-    main_logger.send(HookOutput("forward", ["model"], [""], False, nn.Linear(1, 1), None, None))
+    main_logger.send(HookOutput("forward", ["model"], [""], False, nn.Linear(1, 1), None, None, 0.0))
     logs = main_logger.throw(StopIteration)
     main_logger.close()
     expected = [
@@ -49,7 +49,7 @@ def test_result_holder_send_forward():
 def test_result_holder_send_pre_forward():
     main_logger = logger()
     next(main_logger)
-    main_logger.send(HookOutput("pre_forward", ["model"], [""], False, nn.Linear(1, 1), None, None))
+    main_logger.send(HookOutput("pre_forward", ["model"], [""], False, nn.Linear(1, 1), None, None, 0.0))
     logs = main_logger.throw(StopIteration)
     main_logger.close()
     expected = [
@@ -62,8 +62,8 @@ def test_result_holder_send_pre_forward():
 def test_result_holder_send_both():
     main_logger = logger()
     next(main_logger)
-    main_logger.send(HookOutput("pre_forward", ["model"], [""], False, nn.Linear(1, 1), None, None))
-    main_logger.send(HookOutput("forward", ["model"], [""], False, nn.Linear(1, 1), None, None))
+    main_logger.send(HookOutput("pre_forward", ["model"], [""], False, nn.Linear(1, 1), None, None, 0.0))
+    main_logger.send(HookOutput("forward", ["model"], [""], False, nn.Linear(1, 1), None, None, 1.0))
     logs = main_logger.throw(StopIteration)
     main_logger.close()
     expected = [

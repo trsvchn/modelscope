@@ -8,7 +8,7 @@ import torch.nn as nn
 
 Module = namedtuple("Module", "name obj parent is_parent")
 Handle = namedtuple("Handle", "obj module names parents is_parent")
-HookOutput = namedtuple("HookOutput", "type names parents is_parent module inp out")
+HookOutput = namedtuple("HookOutput", "type names parents is_parent module inp out time")
 Log = namedtuple("Log", "type names parents is_parent module_type out_size num_params")
 
 

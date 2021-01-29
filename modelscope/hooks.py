@@ -1,5 +1,6 @@
 """Model hooks, handles etc.
 """
+import time
 from typing import List, Set, Tuple, Callable, Generator, Optional
 
 import torch.nn as nn
@@ -32,8 +33,8 @@ def prepare_pre_forward_hook(
     """
 
     def hook(module, inp):
-        # Export info
-        output = HookOutput("pre_forward", module_names, module_parents, is_parent, module, inp, None)
+        start = time.time()
+        output = HookOutput("pre_forward", module_names, module_parents, is_parent, module, inp, None, start)
         logger.send(output)
 
     return hook
@@ -48,8 +49,8 @@ def prepare_forward_hook(
     """
 
     def hook(module, inp, out):
-        # Export info
-        output = HookOutput("forward", module_names, module_parents, is_parent, module, inp, out)
+        stop = time.time()
+        output = HookOutput("forward", module_names, module_parents, is_parent, module, inp, out, stop)
         logger.send(output)
 
     return hook
