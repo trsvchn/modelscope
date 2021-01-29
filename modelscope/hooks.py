@@ -27,14 +27,14 @@ def prepare_pre_forward_hook(
         module_names: List[str],
         module_parents: List[str],
         is_parent: bool,
-        results: Generator[List[str], Optional[HookOutput], None]) -> Callable:
+        logger: Generator[List[str], Optional[HookOutput], None]) -> Callable:
     """Prepares pre forward hook.
     """
 
     def hook(module, inp):
         # Export info
         output = HookOutput("pre_forward", module_names, module_parents, is_parent, module, inp, None)
-        results.send(output)
+        logger.send(output)
 
     return hook
 
@@ -43,14 +43,14 @@ def prepare_forward_hook(
         module_names: List[str],
         module_parents: List[str],
         is_parent: bool,
-        results: Generator[List[str], Optional[HookOutput], None]) -> Callable:
+        logger: Generator[List[str], Optional[HookOutput], None]) -> Callable:
     """Prepares forward hook.
     """
 
     def hook(module, inp, out):
         # Export info
         output = HookOutput("forward", module_names, module_parents, is_parent, module, inp, out)
-        results.send(output)
+        logger.send(output)
 
     return hook
 
@@ -58,11 +58,11 @@ def prepare_forward_hook(
 def register_wrapped_forward_hook(
         module: Module,
         module_ids: Set[int],
-        results: Generator[List[str], Optional[HookOutput], None],
+        logger: Generator[List[str], Optional[HookOutput], None],
 ) -> RemovableHandle:
     """Prepare and register forward hook.
     """
-    hook = prepare_forward_hook(module.name, module.parent, module.is_parent, results)
+    hook = prepare_forward_hook(module.name, module.parent, module.is_parent, logger)
     handle = register_forward_hook(hook, module.obj, module_ids)
     return handle
 
@@ -100,7 +100,7 @@ def prepare_handles(modules: Generator[Module, None, None]) -> Tuple[dict, dict]
     return handles_pre_forward, handles_forward
 
 
-def register_forward_hooks(handles, results):
+def register_forward_hooks(handles, logger):
     """Registers forward hook on modules.
     """
     for handle in handles.values():
@@ -108,10 +108,10 @@ def register_forward_hooks(handles, results):
         names = handle.names
         parents = handle.parents
         is_parent = handle.is_parent
-        handle.module._forward_hooks[id_] = prepare_forward_hook(names, parents, is_parent, results)
+        handle.module._forward_hooks[id_] = prepare_forward_hook(names, parents, is_parent, logger)
 
 
-def register_pre_forward_hooks(handles, results):
+def register_pre_forward_hooks(handles, logger):
     """Registers pre-forward hook on modules.
     """
     for handle in handles.values():
@@ -119,4 +119,4 @@ def register_pre_forward_hooks(handles, results):
         names = handle.names
         parents = handle.parents
         is_parent = handle.is_parent
-        handle.module._forward_pre_hooks[id_] = prepare_pre_forward_hook(names, parents, is_parent, results)
+        handle.module._forward_pre_hooks[id_] = prepare_pre_forward_hook(names, parents, is_parent, logger)

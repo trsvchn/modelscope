@@ -8,7 +8,7 @@ from typing import Tuple, List, Optional, Union, Generator
 import torch
 import torch.nn as nn
 
-from .core import HookOutput, Result
+from .core import HookOutput, Log
 
 
 def get_size(obj) -> Optional[Union[torch.Size, List[Optional[torch.Size]]]]:
@@ -63,11 +63,11 @@ def get_num_params(module: nn.Module) -> Tuple[int, int]:
         return 0, 0
 
 
-def result_holder() -> Generator[List[str], Optional[HookOutput], None]:
-    """Stores and processes results from hooks. Yields summary.
+def logger() -> Generator[List[str], Optional[HookOutput], None]:
+    """A kind of logger+filter. Stores and processes hook outputs. Yields logs.
     """
     ids_ = set()
-    summary = []
+    logs = []
     total_num_train_params = 0
     total_num_non_train_params = 0
 
@@ -79,7 +79,7 @@ def result_holder() -> Generator[List[str], Optional[HookOutput], None]:
                     if hook_output.type == "pre_forward":
                         # This handles outputs from pre-forward hooks
 
-                        result = Result(
+                        pre_forward = Log(
                             hook_output.type,
                             hook_output.names,
                             hook_output.parents,
@@ -88,17 +88,18 @@ def result_holder() -> Generator[List[str], Optional[HookOutput], None]:
                             None, None,
                         )
 
-                        summary.append(result)
+                        logs.append(pre_forward)
 
                     elif hook_output.type == "forward":
                         # Forward hooks
+
                         module_type = hook_output.module._get_name()
                         out_size = get_size(hook_output.out)
 
                         num_params = get_num_params(hook_output.module)
                         num_train_params, num_non_train_params = num_params
 
-                        result = Result(
+                        forward = Log(
                             hook_output.type,
                             hook_output.names,
                             hook_output.parents,
@@ -108,7 +109,7 @@ def result_holder() -> Generator[List[str], Optional[HookOutput], None]:
                             num_params,
                         )
 
-                        summary.append(result)
+                        logs.append(forward)
 
                         # Count only basic modules
                         if not hook_output.is_parent:
@@ -120,7 +121,7 @@ def result_holder() -> Generator[List[str], Optional[HookOutput], None]:
                                 ids_.add(module_id)
 
             except StopIteration:
-                result = Result(
+                final = Log(
                     "final",
                     None, None, None, None, None,
                     num_params=(
@@ -129,7 +130,7 @@ def result_holder() -> Generator[List[str], Optional[HookOutput], None]:
                         total_num_non_train_params,
                     ),
                 )
-                summary.append(result)
-                yield summary
+                logs.append(final)
+                yield logs
     finally:
         ...
