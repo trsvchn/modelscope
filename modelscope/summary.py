@@ -60,12 +60,17 @@ def logger(
                                     # Not a perfect solution but ok (for now)
                                     current_parent.append(".".join([hook_output.parents[0], hook_output.names[0]]))
 
+                        try:
+                            module_type = hook_output.module._get_name()
+                        except AttributeError:
+                            module_type = type(hook_output.module)
+
                         pre_forward = Log(
                             hook_output.type,
                             hook_output.names,
                             hook_output.parents,
                             hook_output.is_parent,
-                            hook_output.module._get_name(),
+                            module_type,
                             None, None,
                             hook_output.time,
                         )
@@ -79,7 +84,11 @@ def logger(
                             if hook_output.is_parent:
                                 current_parent.pop()
 
-                        module_type = hook_output.module._get_name()
+                        try:
+                            module_type = hook_output.module._get_name()
+                        except AttributeError:
+                            module_type = hook_output.module.__name__
+
                         out_size = get_size(hook_output.out)
 
                         num_params = get_num_params(hook_output.module)
@@ -111,7 +120,12 @@ def logger(
                             )
 
                             if condition(hook_output, module_parent):
-                                parent = module_parent.split(".")
+                                if not module_parent:
+                                    parent = current_module[-2].names[0]
+                                else:
+                                    parent = module_parent
+
+                                parent = parent.split(".")
                                 parent = ".".join(parent[2:])
                                 parent = parent + "." if parent else ""
                                 full_module_name = parent + module_name
