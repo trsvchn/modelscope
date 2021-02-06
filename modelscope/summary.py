@@ -1,11 +1,11 @@
 """Model Summary.
 """
 from copy import copy
-from typing import Tuple, List, Optional, Generator, Callable
+from typing import Tuple, List, Optional, Callable
 
 from torch.utils.hooks import RemovableHandle
 
-from .core import HookOutput, Handle, Log, get_size, get_num_params, module_walker
+from .core import Handle, get_size, get_num_params, module_walker
 from .utils import size_to_str, adjust_module_name
 
 
@@ -205,18 +205,18 @@ class Summary:
         """Registers pre-forward hook on modules.
         """
         for handle in self.handles_pre_forward.values():
-            id_ = handle.obj.id
-            names = handle.names
-            parents = handle.parents
-            is_parent = handle.is_parent
-            handle.module._forward_pre_hooks[id_] = self.module_pre_forward_hook(names, parents, is_parent)
+            handle.module._forward_pre_hooks[handle.obj.id] = self.module_pre_forward_hook(
+                handle.names,
+                handle.parents,
+                handle.is_parent,
+            )
 
     def register_forward_hooks(self):
         """Registers forward hook on modules.
         """
         for handle in self.handles_forward.values():
-            id_ = handle.obj.id
-            names = handle.names
-            parents = handle.parents
-            is_parent = handle.is_parent
-            handle.module._forward_hooks[id_] = self.module_forward_hook(names, parents, is_parent)
+            handle.module._forward_hooks[handle.obj.id] = self.module_forward_hook(
+                handle.names,
+                handle.parents,
+                handle.is_parent,
+            )
