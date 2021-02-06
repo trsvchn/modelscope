@@ -1,185 +1,222 @@
 """Model Summary.
 """
-from typing import Tuple, List, Optional, Generator
+from copy import copy
+from typing import Tuple, List, Optional, Generator, Callable
 
-from .core import HookOutput, Log, get_size, get_num_params
+from torch.utils.hooks import RemovableHandle
+
+from .core import HookOutput, Handle, Log, get_size, get_num_params, module_walker
 from .utils import size_to_str, adjust_module_name
 
 
-def logger(
-        live: bool = True,
-        model_name: Optional[str] = None,
-        hide_types: Optional[List[str]] = None,
-        top_level: bool = False,
-        col_widths: Tuple[int, int, int, int, int, int, int] = (5, 22, 20, 20, 12, 12, 10),
-) -> Generator[List[str], Optional[HookOutput], None]:
-    """A kind of logger+filter+online summary printer. Stores and processes hook outputs. Yields logs.
-    """
-    model_name = model_name or ""
-    hide_types = hide_types or []
-    col1_w, col2_w, col3_w, col4_w, col5_w, col6_w, col7_w = col_widths
+class Summary:
 
-    ids_ = set()
-    current_module = []
-    current_parent = [""]
-    logs = []
-    count = 1
+    def __init__(
+            self,
+            model,
+            live: bool = True,
+            model_name: Optional[str] = None,
+            full_names: bool = True,
+            hide_types: Optional[List[str]] = None,
+            top_level: bool = False,
+            max_depth: int = 1000,
+            col_widths: Tuple[int, int, int, int, int, int] = (5, 25, 25, 25, 15, 15),
+    ):
+        self.live = live
+        self.model_name = model_name or model._get_name()
+        self.full_names = full_names
+        self.hide_types = hide_types or []
+        self.hide_types = [t.lower() for t in self.hide_types]
+        self.top_level = top_level
+        self.max_depth = max_depth
+        self.col_widths = col_widths
+        self.col1_w, self.col2_w, self.col3_w, self.col4_w, self.col5_w, self.col6_w = self.col_widths
 
-    total_num_train_params = 0
-    total_num_non_train_params = 0
+        self.modules = module_walker((self.model_name, model), yield_parents=True)
 
-    if live:
-        header = f"Model: {model_name}\n\n" \
-                 f"{'':<{col1_w}}Module" \
-                 f"{'':<{sum(col_widths[1:3]) - 6}}{'Output Size':<{col4_w}}Params" \
-                 f"{'':<{sum(col_widths[4:6]) - 6}}{'Runtime, ms':>{col7_w}}\n" \
-                 f"{'':<{col1_w}}" \
-                 f"{'Name':<{col2_w}}" \
-                 f"{'Type':<{col3_w}}" \
-                 f"{'':<{col4_w}}" \
-                 f"{'Train':<{col5_w}}" \
-                 f"{'Non-Train':<{col6_w}}" \
-                 f"{'':>{col7_w}}"
-        print(header)
+        self.handles_pre_forward = {}
+        self.handles_forward = {}
 
-    try:
-        while True:
-            try:
-                hook_output: Optional[HookOutput] = (yield)
-                if hook_output is not None:
-                    if hook_output.type == "pre_forward":
-                        # This handles outputs from pre-forward hooks
+        self.depth = -1
+        self.count = 1
+        self.state = 1
+        self.curr_module = [""]
+        self.curr_parent = [""]
 
-                        if live:
-                            current_module.append(hook_output)
+        self.ids_ = set()
+        self.total_num_train_params = 0
+        self.total_num_non_train_params = 0
 
-                            if hook_output.is_parent:
-                                if len(hook_output.parents) == 1 and len(hook_output.names[0]):
-                                    current_parent.append(".".join([hook_output.parents[0], hook_output.names[0]]))
-                                else:
-                                    # Not a perfect solution but ok (for now)
-                                    current_parent.append(".".join([hook_output.parents[0], hook_output.names[0]]))
+        self.logs = []
 
-                        try:
-                            module_type = hook_output.module._get_name()
-                        except AttributeError:
-                            module_type = type(hook_output.module)
+    def __enter__(self):
+        self.prepare_handles()
+        self.register_pre_forward_hooks()
+        self.register_forward_hooks()
 
-                        pre_forward = Log(
-                            hook_output.type,
-                            hook_output.names,
-                            hook_output.parents,
-                            hook_output.is_parent,
-                            module_type,
-                            None, None,
-                            hook_output.time,
-                        )
+        if self.live:
+            header = f"Model: {self.model_name}\n\n" \
+                     f"{'':<{self.col1_w}}Node" \
+                     f"{'':<{sum(self.col_widths[1:3]) - 4}}{'Output Size':<{self.col4_w}}Params" \
+                     f"{'':<{sum(self.col_widths[4:6]) - 6}}\n" \
+                     f"{'':<{self.col1_w}}" \
+                     f"{'Name':<{self.col2_w}}" \
+                     f"{'Type':<{self.col3_w}}" \
+                     f"{'':<{self.col4_w}}" \
+                     f"{'Train':<{self.col5_w}}" \
+                     f"{'Non-Train':<{self.col6_w}}"
+            print(header)
 
-                        logs.append(pre_forward)
+        return self.logs
 
-                    elif hook_output.type == "forward":
-                        # Forward hooks
+    def __exit__(self, exc_type, exc_value, exc_traceback):
+        for handle in self.handles_pre_forward.values():
+            handle.obj.remove()
+        self.handles_pre_forward = {}
 
-                        if live:
-                            if hook_output.is_parent:
-                                current_parent.pop()
+        for handle in self.handles_forward.values():
+            handle.obj.remove()
+        self.handles_forward = {}
 
-                        try:
-                            module_type = hook_output.module._get_name()
-                        except AttributeError:
-                            module_type = hook_output.module.__name__
+        if self.live:
+            footer = f"\nTotal params: {self.total_num_train_params + self.total_num_non_train_params:,}\n" \
+                     f"Trainable params: {self.total_num_train_params:,}\n" \
+                     f"Non-trainable params: {self.total_num_non_train_params:,}\n"
+            print(footer)
 
-                        out_size = get_size(hook_output.out)
+    def module_pre_forward_hook(self, module_names: List[str], module_parents: List[str], is_parent: bool) -> Callable:
+        """Prepares pre forward hook.
+        """
 
-                        num_params = get_num_params(hook_output.module)
-                        num_train_params, num_non_train_params = num_params
+        def hook(module, inp):
+            # Log here
+            # self.logs.append()
 
-                        forward = Log(
-                            hook_output.type,
-                            hook_output.names,
-                            hook_output.parents,
-                            hook_output.is_parent,
-                            module_type,
-                            out_size,
-                            num_params,
-                            hook_output.time,
-                        )
+            # Online summary
+            if self.live:
+                self.depth += 1
+                if self.state == 1:
+                    self.curr_parent = copy(self.curr_module)
+                self.state = 1
 
-                        logs.append(forward)
+                curr_parent = ".".join(self.curr_parent)
+                module_name, module_parent = adjust_module_name(module_names, module_parents, curr_parent)
 
-                        if live:
-                            if top_level:
-                                condition = lambda o, p: p.count(".") == 1
+                if module_parent != curr_parent:
+                    raise RuntimeError(f"Module parent mismatch error: {module_parent} != {curr_parent}")
+
+                self.curr_module.append(module_name)
+
+        return hook
+
+    def module_forward_hook(self, module_names: List[str], module_parents: List[str], is_parent: bool) -> Callable:
+        """Prepares forward hook.
+        """
+
+        def hook(module, inp, out):
+            # Log here
+            # self.logs.append()
+
+            # Online summary
+            if self.live:
+
+                is_comp = True if self.state == 0 else False
+                self.state = 0
+
+                self.curr_parent = self.curr_module[:-1]
+                curr_parent = ".".join(self.curr_parent)
+                module_name, module_parent = adjust_module_name(module_names, module_parents, curr_parent)
+
+                if self.curr_module[-1] != module_name:
+                    raise RuntimeError(f"Module name mismatch error: {self.curr_module[-1]} != {module_name}")
+
+                if module_parent != curr_parent:
+                    raise RuntimeError(f"Module parent mismatch error: {module_parent} != {curr_parent}")
+
+                # Compute size and parameters
+                out_size = get_size(out)
+                num_params = get_num_params(module)
+                num_train_params, num_non_train_params = num_params
+
+                # Count only basic modules
+                if not is_comp:
+                    # Count only once
+                    module_id = id(module)
+                    if module_id not in self.ids_:
+                        self.total_num_train_params += num_train_params
+                        self.total_num_non_train_params += num_non_train_params
+                        self.ids_.add(module_id)
+
+                condition = (self.depth == 1) if self.top_level else (not is_comp)
+
+                if condition:
+                    if self.depth <= self.max_depth:
+                        module_type = module._get_name()
+                        if module_type.lower() not in self.hide_types:
+                            if self.full_names:
+                                module_name = ".".join(self.curr_module[2:])
                             else:
-                                condition = lambda o, p: not o.is_parent
+                                module_name = self.curr_module[-1]
 
-                            module_name, module_parent = adjust_module_name(
-                                hook_output.names,
-                                hook_output.parents,
-                                current_parent[-1],
-                            )
+                            line = f"{self.count:<{self.col1_w}}" \
+                                   f"{module_name:<{self.col2_w}}" \
+                                   f"{module_type:<{self.col3_w}}" \
+                                   f"{size_to_str(out_size):<{self.col4_w}}" \
+                                   f"{num_train_params:<{self.col5_w},}" \
+                                   f"{num_non_train_params:<{self.col6_w},}"
 
-                            if condition(hook_output, module_parent):
-                                if not module_parent:
-                                    parent = current_module[-2].names[0]
-                                else:
-                                    parent = module_parent
+                            print(line)
 
-                                parent = parent.split(".")
-                                parent = ".".join(parent[2:])
-                                parent = parent + "." if parent else ""
-                                full_module_name = parent + module_name
+                            self.count += 1
 
-                                if module_type.lower() not in [t.lower() for t in hide_types]:
-                                    if hook_output.module is current_module[-1].module:
-                                        time = hook_output.time - current_module[-1].time
-                                    else:
-                                        time = 0.0
+                self.depth -= 1
+                self.curr_module.pop()
 
-                                    out_size_str = size_to_str(out_size)
-                                    line = f"{count:<{col1_w}}" \
-                                           f"{full_module_name:<{col2_w}}" \
-                                           f"{module_type:<{col3_w}}" \
-                                           f"{out_size_str:<{col4_w}}" \
-                                           f"{num_train_params:<{col5_w},}" \
-                                           f"{num_non_train_params:<{col6_w},}" \
-                                           f" {time * 10 ** 3:>{col7_w}.5f}"
+        return hook
 
-                                    print(line)
+    def prepare_handles(self):
+        """Experimental function to handle cases when the same module
+        is reused in multiple places under different names. (See Model4 from tests/conf.py.)
+        """
+        ids_pre_forward = set()
+        ids_forward = set()
 
-                                    count += 1
+        # Iterate over modules
+        for m in self.modules:
+            module_id = id(m.obj)
 
-                            current_module.pop()
+            for type_, ids_, handles in (
+                    ("_forward_pre_hooks", ids_pre_forward, self.handles_pre_forward),
+                    ("_forward_hooks", ids_forward, self.handles_forward),
+            ):
+                if module_id not in ids_:
+                    # Create a handle for a module
+                    handle = RemovableHandle(getattr(m.obj, type_))
+                    # Store handle in a dict
+                    handles[module_id] = Handle(handle, m.obj, [m.name], [m.parent], m.is_parent)
+                    # Update ids
+                    ids_.add(module_id)
+                else:
+                    # If Module already registered append other name and parent
+                    handles[module_id].names.append(m.name)
+                    handles[module_id].parents.append(m.parent)
 
-                        # Count only basic modules
-                        if not hook_output.is_parent:
+    def register_pre_forward_hooks(self):
+        """Registers pre-forward hook on modules.
+        """
+        for handle in self.handles_pre_forward.values():
+            id_ = handle.obj.id
+            names = handle.names
+            parents = handle.parents
+            is_parent = handle.is_parent
+            handle.module._forward_pre_hooks[id_] = self.module_pre_forward_hook(names, parents, is_parent)
 
-                            # Count only once
-                            module_id = id(hook_output.module)
-                            if module_id not in ids_:
-                                total_num_train_params += num_train_params
-                                total_num_non_train_params += num_non_train_params
-                                ids_.add(module_id)
-
-            except StopIteration:
-                if live:
-                    footer = f"\nTotal params: {total_num_train_params + total_num_non_train_params:,}\n" \
-                             f"Trainable params: {total_num_train_params:,}\n" \
-                             f"Non-trainable params: {total_num_non_train_params:,}"
-                    print(footer)
-
-                final = Log(
-                    "final",
-                    None, None, None, None, None,
-                    (
-                        total_num_train_params + total_num_non_train_params,
-                        total_num_train_params,
-                        total_num_non_train_params,
-                    ),
-                    None,
-                )
-                logs.append(final)
-                yield logs
-    finally:
-        if live:
-            print()
+    def register_forward_hooks(self):
+        """Registers forward hook on modules.
+        """
+        for handle in self.handles_forward.values():
+            id_ = handle.obj.id
+            names = handle.names
+            parents = handle.parents
+            is_parent = handle.is_parent
+            handle.module._forward_hooks[id_] = self.module_forward_hook(names, parents, is_parent)
