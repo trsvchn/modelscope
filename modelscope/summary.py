@@ -1,8 +1,13 @@
 """Model Summary.
 """
 from copy import copy
+from inspect import getmembers, isfunction, isbuiltin, ismethoddescriptor, ismethod
+from contextlib import contextmanager
+from functools import wraps
 from typing import Tuple, List, Optional, Callable
 
+import torch
+import torch.nn.functional
 from torch.utils.hooks import RemovableHandle
 
 from .core import Handle, get_size, get_num_params, module_walker
@@ -10,6 +15,69 @@ from .utils import size_to_str, adjust_module_name
 
 
 class Summary:
+
+    f_ignore = [
+        "adaptive_avg_pool1d",
+        "adaptive_max_pool1d",
+        "alpha_dropout",
+        "avg_pool1d",
+        "batch_norm",
+        "bilinear",
+        "binary_cross_entropy_with_logits",
+        "celu",
+        "celu_",
+        "channel_shuffle",
+        "conv1d",
+        "conv2d",
+        "conv3d",
+        "conv_tbc",
+        "conv_transpose1d",
+        "conv_transpose2d",
+        "conv_transpose3d",
+        "cosine_embedding_loss",
+        "cosine_similarity",
+        "ctc_loss",
+        "dropout",
+        "embedding",
+        "embedding_bag",
+        "feature_alpha_dropout",
+        "group_norm",
+        "hardshrink",
+        "hinge_embedding_loss",
+        "instance_norm",
+        "kl_div",
+        "layer_norm",
+        "log_softmax",
+        "margin_ranking_loss",
+        "max_pool1d",
+        "max_pool1d_with_indices",
+        "max_pool2d",
+        "max_pool3d",
+        "pairwise_distance",
+        "pdist",
+        "pixel_shuffle",
+        "poisson_nll_loss",
+        "prelu",
+        "relu",
+        "relu_",
+        "rrelu",
+        "rrelu_",
+        "selu",
+        "selu_",
+        "sigmoid",
+        "softmax",
+        "tanh",
+        "threshold",
+        "threshold_",
+        "triplet_margin_loss",
+    ]
+
+    fn_types = {
+        "method_descriptor": "method",
+        "method": "method",
+        "builtin_function_or_method": "function",
+        "function": "function",
+    }
 
     def __init__(
             self,
@@ -32,7 +100,17 @@ class Summary:
         self.col_widths = col_widths
         self.col1_w, self.col2_w, self.col3_w, self.col4_w, self.col5_w, self.col6_w = self.col_widths
 
+        self.model = model
+        self.model_backup = {}
         self.modules = module_walker((self.model_name, model), yield_parents=True)
+        self.torch_module = torch
+        self.torch_backup = {}
+
+        self.tensor_module = torch.Tensor
+        self.tensor_backup = {}
+
+        self.f_module = torch.nn.functional
+        self.f_backup = {}
 
         self.handles_pre_forward = {}
         self.handles_forward = {}
@@ -48,6 +126,29 @@ class Summary:
         self.total_num_non_train_params = 0
 
         self.logs = []
+
+        self.fold = False
+
+        for member in getmembers(self.torch_module):
+            if isfunction(member[-1]) or isbuiltin(member[-1]):
+                if not member[0].startswith("_"):
+                    self.torch_backup.update({member[0]: member[-1]})
+
+        for member in getmembers(self.tensor_module):
+            if isfunction(member[-1]) or ismethoddescriptor(member[-1]):
+                if not member[0].startswith("_"):
+                    self.tensor_backup.update({member[0]: member[-1]})
+
+        for member in getmembers(self.f_module):
+            if isfunction(member[-1]) or isbuiltin(member[-1]):
+                if (not member[0].startswith("_")) and (member[0] not in self.f_ignore):
+                    self.f_backup.update({member[0]: member[-1]})
+
+        for member in getmembers(self.model):
+            if isfunction(member[-1]) or ismethod(member[-1]) or isbuiltin(member[-1]) or ismethoddescriptor(member[-1]):
+                if not member[0].startswith("_"):
+                    if member[0] not in [i[0] for i in getmembers(torch.nn.Module())]:
+                        self.model_backup.update({member[0]: member[-1]})
 
     def __enter__(self):
         self.prepare_handles()
@@ -67,9 +168,33 @@ class Summary:
                      f"{'Non-Train':<{self.col6_w}}"
             print(header)
 
+        for k, v in self.torch_backup.items():
+            setattr(self.torch_module, k, self.fn_hook(v, k))
+
+        for k, v in self.tensor_backup.items():
+            setattr(self.tensor_module, k, self.fn_hook(v, k))
+
+        for k, v in self.f_backup.items():
+            setattr(self.f_module, k, self.fn_hook(v, k))
+
+        for k, v in self.model_backup.items():
+            setattr(self.model, k, self.fn_hook(v, k))
+
         return self.logs
 
     def __exit__(self, exc_type, exc_value, exc_traceback):
+        for k, v in self.torch_backup.items():
+            setattr(self.torch_module, k, v)
+
+        for k, v in self.tensor_backup.items():
+            setattr(self.tensor_module, k, v)
+
+        for k, v in self.f_backup.items():
+            setattr(self.f_module, k, v)
+
+        for k, v in self.model_backup.items():
+            setattr(self.model, k, v)
+
         for handle in self.handles_pre_forward.values():
             handle.obj.remove()
         self.handles_pre_forward = {}
@@ -94,6 +219,10 @@ class Summary:
 
             # Online summary
             if self.live:
+
+                if module._get_name() in dir(torch.nn):
+                    self.fold = True
+
                 self.depth += 1
                 if self.state == 1:
                     self.curr_parent = copy(self.curr_module)
@@ -101,9 +230,6 @@ class Summary:
 
                 curr_parent = ".".join(self.curr_parent)
                 module_name, module_parent = adjust_module_name(module_names, module_parents, curr_parent)
-
-                if module_parent != curr_parent:
-                    raise RuntimeError(f"Module parent mismatch error: {module_parent} != {curr_parent}")
 
                 self.curr_module.append(module_name)
 
@@ -119,6 +245,8 @@ class Summary:
 
             # Online summary
             if self.live:
+                if module._get_name() in dir(torch.nn):
+                    self.fold = False
 
                 is_comp = True if self.state == 0 else False
                 self.state = 0
@@ -130,12 +258,12 @@ class Summary:
                 if self.curr_module[-1] != module_name:
                     raise RuntimeError(f"Module name mismatch error: {self.curr_module[-1]} != {module_name}")
 
-                if module_parent != curr_parent:
-                    raise RuntimeError(f"Module parent mismatch error: {module_parent} != {curr_parent}")
-
-                # Compute size and parameters
-                out_size = get_size(out)
-                num_params = get_num_params(module)
+                # Compute size
+                with self.tmp_unpatch(["size"], self.tensor_module, self.tensor_backup):
+                    out_size = get_size(out)
+                # Count parameters
+                with self.tmp_unpatch(["dim", "unbind", "numel"], self.tensor_module, self.tensor_backup):
+                    num_params = get_num_params(module)
                 num_train_params, num_non_train_params = num_params
 
                 # Count only basic modules
@@ -220,3 +348,80 @@ class Summary:
                 handle.parents,
                 handle.is_parent,
             )
+
+    @contextmanager
+    def tmp_unpatch(self, fns: List[str], module, backup):
+        for fn in fns:
+            setattr(module, fn, backup[fn])
+        yield
+        for fn in fns:
+            setattr(module, fn, self.fn_hook(backup[fn], fn))
+
+    def fn_hook(self, fn, name):
+
+        @wraps(fn)
+        def hook(*args, **kwargs):
+            # Log here
+            # self.logs.append()
+
+            # Online summary
+            if self.live:
+                if not self.fold:
+                    self.depth += 1
+                    if self.state == 1:
+                        self.curr_parent = copy(self.curr_module)
+                    self.state = 1
+
+                    self.curr_module.append(name)
+
+            # Run function here
+            out = fn(*args, **kwargs)
+
+            # Log here
+            # self.logs.append()
+
+            # Online summary
+            if self.live:
+                if not self.fold:
+                    is_comp = True if self.state == 0 else False
+                    self.state = 0
+
+                    self.curr_parent = self.curr_module[:-1]
+
+                    if self.curr_module[-1] != name:
+                        raise RuntimeError(f"Module name mismatch error: {self.curr_module[-1]} != {name}")
+
+                    # Compute size
+                    with self.tmp_unpatch(["size"], self.tensor_module, self.tensor_backup):
+                        out_size = get_size(out)
+                    # Count parameters
+                    num_train_params, num_non_train_params = (0, 0)
+
+                    condition = (self.depth == 1) if self.top_level else (not is_comp)
+
+                    if condition:
+                        if self.depth <= self.max_depth:
+                            fn_type = self.fn_types.get(type(fn).__name__, "unknown")
+                            if fn_type.lower() not in self.hide_types:
+                                if self.full_names:
+                                    fn_name = ".".join(self.curr_module[2:])
+                                else:
+                                    fn_name = self.curr_module[-1]
+
+                                line = f"{self.count:<{self.col1_w}}" \
+                                       f"{fn_name:<{self.col2_w}}" \
+                                       f"{fn_type:<{self.col3_w}}" \
+                                       f"{size_to_str(out_size):<{self.col4_w}}" \
+                                       f"{num_train_params:<{self.col5_w},}" \
+                                       f"{num_non_train_params:<{self.col6_w},}"
+
+                                print(line)
+
+                                self.count += 1
+
+                    self.depth -= 1
+                    self.curr_module.pop()
+
+            return out
+
+        return hook
