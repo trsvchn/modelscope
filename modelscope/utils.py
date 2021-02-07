@@ -5,13 +5,15 @@ from typing import Tuple, List, Any
 import torch
 
 
-def size_to_str(size: Any) -> str:
+def size_to_str(size: Any, parenthesis: bool = False) -> str:
     """Size to string converter.
     """
+    o, c = "[]" if not parenthesis else "()"
+
     if isinstance(size, torch.Size):
-        out = f"[{', '.join(map(str, size))}]"
+        out = f"{o}{', '.join(map(str, size))}{c}"
     elif isinstance(size, (tuple, list)):
-        out = f"[{', '.join(size_to_str(s) for s in size)}]"
+        out = f"{o}{', '.join(size_to_str(s) for s in size)}{c}"
     elif size is None:
         out = "None"
     else:

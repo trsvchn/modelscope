@@ -11,7 +11,7 @@ import torch.nn as nn
 import torch.nn.functional
 from torch.utils.hooks import RemovableHandle
 
-from .core import Handle, get_size, get_num_params, module_walker
+from .core import Handle, get_size, module_walker
 from .utils import size_to_str, adjust_module_name
 
 
