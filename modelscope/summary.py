@@ -88,6 +88,7 @@ class Summary:
             full_type_names: bool = True,
             hide_names: Optional[List[str]] = None,
             hide_types: Optional[List[str]] = None,
+            fold_nodes: Optional[List[str]] = None,
             top_level: bool = False,
             low_level: bool = False,
             max_depth: int = 1000,
@@ -97,9 +98,10 @@ class Summary:
         self.model_name = model_name or model._get_name()
         self.full_names = full_names
         self.full_type_names = full_type_names
+        self.hide_names = hide_names or []
         self.hide_types = hide_types or []
         self.hide_types = [t.lower() for t in self.hide_types]
-        self.hide_names = hide_names or []
+        self.fold_nodes = fold_nodes or []
         self.top_level = top_level
         self.low_level = low_level
         self.max_depth = max_depth
@@ -134,6 +136,7 @@ class Summary:
         self.logs = []
 
         self.fold = False
+        self.force_hide = False
 
         for member in getmembers(self.torch_module):
             if isfunction(member[-1]) or isbuiltin(member[-1]):
@@ -240,6 +243,10 @@ class Summary:
 
                 self.curr_module.append(module_name)
 
+                full_module_name = ".".join(self.curr_module[2:])
+                if full_module_name in self.fold_nodes:
+                    self.force_hide = True
+
         return hook
 
     def module_forward_hook(self, module_names: List[str], module_parents: List[str], is_parent: bool) -> Callable:
@@ -286,32 +293,35 @@ class Summary:
                         self.total_num_non_train_params += num_non_train_params
                         self.ids_.add(module_id)
 
-                display = (self.depth == 1) if self.top_level else (not is_comp)
+                full_module_name = ".".join(self.curr_module[2:])
+                display = (self.depth == 1) if self.top_level else (not is_comp or full_module_name in self.fold_nodes)
 
                 if display:
                     if self.depth <= self.max_depth:
                         module_type = module._get_name()
                         if module_type.lower() not in self.hide_types:
-                            full_module_name = ".".join(self.curr_module[2:])
                             if full_module_name not in self.hide_names:
-                                if self.full_names:
-                                    module_name = full_module_name
-                                else:
-                                    module_name = self.curr_module[-1]
+                                if (not self.force_hide) or (self.force_hide and is_comp):
+                                    if self.full_names:
+                                        module_name = full_module_name
+                                    else:
+                                        module_name = self.curr_module[-1]
 
-                                line = f"{self.count:<{self.col1_w}}" \
-                                       f"{module_name:<{self.col2_w}}" \
-                                       f"{module_type:<{self.col3_w}}" \
-                                       f"{size_to_str(out_size):<{self.col4_w}}" \
-                                       f"{num_train_params:<{self.col5_w},}" \
-                                       f"{num_non_train_params:<{self.col6_w},}"
+                                    line = f"{self.count:<{self.col1_w}}" \
+                                           f"{module_name:<{self.col2_w}}" \
+                                           f"{module_type:<{self.col3_w}}" \
+                                           f"{size_to_str(out_size):<{self.col4_w}}" \
+                                           f"{num_train_params:<{self.col5_w},}" \
+                                           f"{num_non_train_params:<{self.col6_w},}"
 
-                                print(line)
+                                    print(line)
 
-                                self.count += 1
+                                    self.count += 1
 
                 self.depth -= 1
                 self.curr_module.pop()
+                if full_module_name in self.fold_nodes:
+                    self.force_hide = False
 
         return hook
 
@@ -387,6 +397,10 @@ class Summary:
 
                     self.curr_module.append(name)
 
+                    full_fn_name = ".".join(self.curr_module[2:])
+                    if full_fn_name in self.fold_nodes:
+                        self.force_hide = True
+
             # Run function here
             out = fn(*args, **kwargs)
 
@@ -411,40 +425,37 @@ class Summary:
                     # Count parameters
                     num_train_params, num_non_train_params = (0, 0)
 
-                    condition = (self.depth == 1) if self.top_level else (not is_comp)
+                    full_fn_name = ".".join(self.curr_module[2:])
+                    display = (self.depth == 1) if self.top_level else (not is_comp or full_fn_name in self.fold_nodes)
 
-                    if condition:
+                    if display:
                         if self.depth <= self.max_depth:
-
                             fn_type = self.fn_types.get(type(fn).__name__, "unknown")
-
                             if self.full_type_names:
                                 fn_type = f"{fn.__name__} ({fn_type})"
-
                             if fn_type.lower() not in self.hide_types:
-
-                                full_fn_name = ".".join(self.curr_module[2:])
-
                                 if full_fn_name not in self.hide_names:
+                                    if (not self.force_hide) or (self.force_hide and is_comp):
+                                        if self.full_names:
+                                            fn_name = full_fn_name
+                                        else:
+                                            fn_name = self.curr_module[-1]
 
-                                    if self.full_names:
-                                        fn_name = full_fn_name
-                                    else:
-                                        fn_name = self.curr_module[-1]
+                                        line = f"{self.count:<{self.col1_w}}" \
+                                               f"{fn_name:<{self.col2_w}}" \
+                                               f"{fn_type:<{self.col3_w}}" \
+                                               f"{size_to_str(out_size):<{self.col4_w}}" \
+                                               f"{num_train_params:<{self.col5_w},}" \
+                                               f"{num_non_train_params:<{self.col6_w},}"
 
-                                    line = f"{self.count:<{self.col1_w}}" \
-                                           f"{fn_name:<{self.col2_w}}" \
-                                           f"{fn_type:<{self.col3_w}}" \
-                                           f"{size_to_str(out_size):<{self.col4_w}}" \
-                                           f"{num_train_params:<{self.col5_w},}" \
-                                           f"{num_non_train_params:<{self.col6_w},}"
+                                        print(line)
 
-                                    print(line)
-
-                                    self.count += 1
+                                        self.count += 1
 
                     self.depth -= 1
                     self.curr_module.pop()
+                    if full_fn_name in self.fold_nodes:
+                        self.force_hide = False
 
             return out
 
