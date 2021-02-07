@@ -7,6 +7,7 @@ from functools import wraps
 from typing import Tuple, List, Optional, Callable
 
 import torch
+import torch.nn as nn
 import torch.nn.functional
 from torch.utils.hooks import RemovableHandle
 
@@ -131,7 +132,7 @@ class Summary:
         self.curr_module = [""]
         self.curr_parent = [""]
 
-        self.ids_ = set()
+        self.param_ids = set()
         self.total_num_train_params = 0
         self.total_num_non_train_params = 0
 
@@ -221,6 +222,42 @@ class Summary:
                      f"Non-trainable params: {self.total_num_non_train_params:,}\n"
             print(footer)
 
+    def get_num_params(self, module: nn.Module) -> Tuple[int, int]:
+        """Counts parameters of the module (trainable, non-trainable).
+        """
+        try:
+            # Get params
+            params = module.parameters()
+            # Get the first one
+            param = next(params, None)
+            # Module contains params
+            if param is not None:
+                # Count number of elements of Parameters
+                num_train_params = 0
+                num_non_train_params = 0
+                p_id = id(param)
+                if p_id not in self.param_ids:
+                    self.param_ids.add(p_id)
+                    if param.requires_grad:
+                        num_train_params += param.numel()
+                    else:
+                        num_non_train_params += param.numel()
+                for p in params:
+                    p_id = id(p)
+                    if p_id not in self.param_ids:
+                        self.param_ids.add(p_id)
+                        if p.requires_grad:
+                            num_train_params += p.numel()
+                        else:
+                            num_non_train_params += p.numel()
+                return num_train_params, num_non_train_params
+            else:
+                # If params empty
+                return 0, 0
+        except AttributeError:
+            # No params at all
+            return 0, 0
+
     def module_pre_forward_hook(self, module_names: List[str], module_parents: List[str], is_parent: bool) -> Callable:
         """Prepares pre forward hook.
         """
@@ -282,19 +319,9 @@ class Summary:
 
                 # Count parameters
                 with self.tmp_unpatch(["dim", "unbind", "numel"], self.tensor_module, self.tensor_backup):
-                    num_params = get_num_params(module)
-                num_train_params, num_non_train_params = num_params
-
-                count = (self.depth == 0) if self.low_level else (not is_comp)
-
-                # Count only basic modules
-                if count:
-                    # Count only once
-                    module_id = id(module)
-                    if module_id not in self.ids_:
-                        self.total_num_train_params += num_train_params
-                        self.total_num_non_train_params += num_non_train_params
-                        self.ids_.add(module_id)
+                    num_train_params, num_non_train_params = self.get_num_params(module)
+                self.total_num_train_params += num_train_params
+                self.total_num_non_train_params += num_non_train_params
 
                 full_module_name = ".".join(self.curr_module[2:])
                 display = (self.depth == 1) if self.top_level else (not is_comp or full_module_name in self.fold_nodes)
