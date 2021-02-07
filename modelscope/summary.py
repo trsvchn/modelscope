@@ -85,9 +85,10 @@ class Summary:
             live: bool = True,
             model_name: Optional[str] = None,
             full_names: bool = True,
-            full_type_names: bool = True,
+            full_type_names: bool = False,
             hide_names: Optional[List[str]] = None,
             hide_types: Optional[List[str]] = None,
+            exclude_hidden: bool = True,
             fold_nodes: Optional[List[str]] = None,
             top_level: bool = False,
             low_level: bool = False,
@@ -101,6 +102,7 @@ class Summary:
         self.hide_names = hide_names or []
         self.hide_types = hide_types or []
         self.hide_types = [t.lower() for t in self.hide_types]
+        self.exclude_hidden = exclude_hidden
         self.fold_nodes = fold_nodes or []
         self.top_level = top_level
         self.low_level = low_level
@@ -137,6 +139,7 @@ class Summary:
 
         self.fold = False
         self.force_hide = False
+        self.prev_is_suppressed = False
 
         for member in getmembers(self.torch_module):
             if isfunction(member[-1]) or isbuiltin(member[-1]):
@@ -297,6 +300,7 @@ class Summary:
                 display = (self.depth == 1) if self.top_level else (not is_comp or full_module_name in self.fold_nodes)
 
                 if display:
+                    line = None
                     if self.depth <= self.max_depth:
                         module_type = module._get_name()
                         if module_type.lower() not in self.hide_types:
@@ -315,8 +319,18 @@ class Summary:
                                            f"{num_non_train_params:<{self.col6_w},}"
 
                                     print(line)
-
+                                    self.prev_is_suppressed = False
                                     self.count += 1
+                                else:
+                                    line = ""
+
+                    if line is None:
+                        if not self.exclude_hidden:
+                            if not self.prev_is_suppressed:
+                                line = f"{'':<{self.col1_w}}" \
+                                       f"{'...':<{self.col2_w}}"
+                                print(line)
+                                self.prev_is_suppressed = True
 
                 self.depth -= 1
                 self.curr_module.pop()
@@ -429,6 +443,7 @@ class Summary:
                     display = (self.depth == 1) if self.top_level else (not is_comp or full_fn_name in self.fold_nodes)
 
                     if display:
+                        line = None
                         if self.depth <= self.max_depth:
                             fn_type = self.fn_types.get(type(fn).__name__, "unknown")
                             if self.full_type_names:
@@ -449,8 +464,17 @@ class Summary:
                                                f"{num_non_train_params:<{self.col6_w},}"
 
                                         print(line)
-
+                                        self.prev_is_suppressed = False
                                         self.count += 1
+                                    else:
+                                        line = ""
+                        if line is None:
+                            if not self.exclude_hidden:
+                                if not self.prev_is_suppressed:
+                                    line = f"{'':<{self.col1_w}}" \
+                                           f"{'...':<{self.col2_w}}"
+                                    print(line)
+                                    self.prev_is_suppressed = True
 
                     self.depth -= 1
                     self.curr_module.pop()
