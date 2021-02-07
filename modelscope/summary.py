@@ -85,17 +85,23 @@ class Summary:
             live: bool = True,
             model_name: Optional[str] = None,
             full_names: bool = True,
+            full_type_names: bool = True,
+            hide_names: Optional[List[str]] = None,
             hide_types: Optional[List[str]] = None,
             top_level: bool = False,
+            low_level: bool = False,
             max_depth: int = 1000,
             col_widths: Tuple[int, int, int, int, int, int] = (5, 25, 25, 25, 15, 15),
     ):
         self.live = live
         self.model_name = model_name or model._get_name()
         self.full_names = full_names
+        self.full_type_names = full_type_names
         self.hide_types = hide_types or []
         self.hide_types = [t.lower() for t in self.hide_types]
+        self.hide_names = hide_names or []
         self.top_level = top_level
+        self.low_level = low_level
         self.max_depth = max_depth
         self.col_widths = col_widths
         self.col1_w, self.col2_w, self.col3_w, self.col4_w, self.col5_w, self.col6_w = self.col_widths
@@ -220,8 +226,9 @@ class Summary:
             # Online summary
             if self.live:
 
-                if module._get_name() in dir(torch.nn):
-                    self.fold = True
+                if not self.low_level:
+                    if module._get_name() in dir(torch.nn):
+                        self.fold = True
 
                 self.depth += 1
                 if self.state == 1:
@@ -245,8 +252,9 @@ class Summary:
 
             # Online summary
             if self.live:
-                if module._get_name() in dir(torch.nn):
-                    self.fold = False
+                if not self.low_level:
+                    if module._get_name() in dir(torch.nn):
+                        self.fold = False
 
                 is_comp = True if self.state == 0 else False
                 self.state = 0
@@ -261,13 +269,16 @@ class Summary:
                 # Compute size
                 with self.tmp_unpatch(["size"], self.tensor_module, self.tensor_backup):
                     out_size = get_size(out)
+
                 # Count parameters
                 with self.tmp_unpatch(["dim", "unbind", "numel"], self.tensor_module, self.tensor_backup):
                     num_params = get_num_params(module)
                 num_train_params, num_non_train_params = num_params
 
+                count = (self.depth == 0) if self.low_level else (not is_comp)
+
                 # Count only basic modules
-                if not is_comp:
+                if count:
                     # Count only once
                     module_id = id(module)
                     if module_id not in self.ids_:
@@ -275,27 +286,29 @@ class Summary:
                         self.total_num_non_train_params += num_non_train_params
                         self.ids_.add(module_id)
 
-                condition = (self.depth == 1) if self.top_level else (not is_comp)
+                display = (self.depth == 1) if self.top_level else (not is_comp)
 
-                if condition:
+                if display:
                     if self.depth <= self.max_depth:
                         module_type = module._get_name()
                         if module_type.lower() not in self.hide_types:
-                            if self.full_names:
-                                module_name = ".".join(self.curr_module[2:])
-                            else:
-                                module_name = self.curr_module[-1]
+                            full_module_name = ".".join(self.curr_module[2:])
+                            if full_module_name not in self.hide_names:
+                                if self.full_names:
+                                    module_name = full_module_name
+                                else:
+                                    module_name = self.curr_module[-1]
 
-                            line = f"{self.count:<{self.col1_w}}" \
-                                   f"{module_name:<{self.col2_w}}" \
-                                   f"{module_type:<{self.col3_w}}" \
-                                   f"{size_to_str(out_size):<{self.col4_w}}" \
-                                   f"{num_train_params:<{self.col5_w},}" \
-                                   f"{num_non_train_params:<{self.col6_w},}"
+                                line = f"{self.count:<{self.col1_w}}" \
+                                       f"{module_name:<{self.col2_w}}" \
+                                       f"{module_type:<{self.col3_w}}" \
+                                       f"{size_to_str(out_size):<{self.col4_w}}" \
+                                       f"{num_train_params:<{self.col5_w},}" \
+                                       f"{num_non_train_params:<{self.col6_w},}"
 
-                            print(line)
+                                print(line)
 
-                            self.count += 1
+                                self.count += 1
 
                 self.depth -= 1
                 self.curr_module.pop()
@@ -394,6 +407,7 @@ class Summary:
                     # Compute size
                     with self.tmp_unpatch(["size"], self.tensor_module, self.tensor_backup):
                         out_size = get_size(out)
+
                     # Count parameters
                     num_train_params, num_non_train_params = (0, 0)
 
@@ -401,23 +415,33 @@ class Summary:
 
                     if condition:
                         if self.depth <= self.max_depth:
+
                             fn_type = self.fn_types.get(type(fn).__name__, "unknown")
+
+                            if self.full_type_names:
+                                fn_type = f"{fn.__name__} ({fn_type})"
+
                             if fn_type.lower() not in self.hide_types:
-                                if self.full_names:
-                                    fn_name = ".".join(self.curr_module[2:])
-                                else:
-                                    fn_name = self.curr_module[-1]
 
-                                line = f"{self.count:<{self.col1_w}}" \
-                                       f"{fn_name:<{self.col2_w}}" \
-                                       f"{fn_type:<{self.col3_w}}" \
-                                       f"{size_to_str(out_size):<{self.col4_w}}" \
-                                       f"{num_train_params:<{self.col5_w},}" \
-                                       f"{num_non_train_params:<{self.col6_w},}"
+                                full_fn_name = ".".join(self.curr_module[2:])
 
-                                print(line)
+                                if full_fn_name not in self.hide_names:
 
-                                self.count += 1
+                                    if self.full_names:
+                                        fn_name = full_fn_name
+                                    else:
+                                        fn_name = self.curr_module[-1]
+
+                                    line = f"{self.count:<{self.col1_w}}" \
+                                           f"{fn_name:<{self.col2_w}}" \
+                                           f"{fn_type:<{self.col3_w}}" \
+                                           f"{size_to_str(out_size):<{self.col4_w}}" \
+                                           f"{num_train_params:<{self.col5_w},}" \
+                                           f"{num_non_train_params:<{self.col6_w},}"
+
+                                    print(line)
+
+                                    self.count += 1
 
                     self.depth -= 1
                     self.curr_module.pop()
