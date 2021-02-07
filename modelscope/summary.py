@@ -473,9 +473,9 @@ class Summary:
                         line = None
                         if self.depth <= self.max_depth:
                             fn_type = self.fn_types.get(type(fn).__name__, "unknown")
-                            if self.full_type_names:
-                                fn_type = f"{fn.__name__} ({fn_type})"
                             if fn_type.lower() not in self.hide_types:
+                                if self.full_type_names:
+                                    fn_type = f"{fn.__name__} ({type(fn).__name__})"
                                 if full_fn_name not in self.hide_names:
                                     if (not self.force_hide) or (self.force_hide and is_comp):
                                         if self.full_names:
