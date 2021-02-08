@@ -13,7 +13,7 @@ import torch.nn as nn
 Module = namedtuple("Module", "name obj parent is_parent")
 Handle = namedtuple("Handle", "obj module names parents is_parent")
 HookOutput = namedtuple("HookOutput", "type names parents is_parent module inp out time")
-Log = namedtuple("Log", "event category type names parents is_parent out_size num_params depth time")
+Log = namedtuple("Log", "event category type names parents is_parent out_size num_params time")
 
 
 def module_walker(

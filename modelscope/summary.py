@@ -1,5 +1,6 @@
 """Model Summary.
 """
+import time
 from copy import copy
 from inspect import getmembers, isfunction, isbuiltin, ismethoddescriptor, ismethod
 from contextlib import contextmanager
@@ -11,7 +12,7 @@ import torch.nn as nn
 import torch.nn.functional
 from torch.utils.hooks import RemovableHandle
 
-from .core import Handle, get_size, module_walker
+from .core import Handle, Log, get_size, module_walker
 from .utils import size_to_str, adjust_module_name
 
 
@@ -264,7 +265,20 @@ class Summary:
 
         def hook(module, inp):
             # Log here
-            # self.logs.append()
+            start = time.time()
+            self.logs.append(
+                Log(
+                    event="start",
+                    category="module",
+                    type=module._get_name(),
+                    names=module_names,
+                    parents=module_parents,
+                    is_parent=is_parent,
+                    out_size=None,
+                    num_params=None,
+                    time=start,
+                )
+            )
 
             # Online summary
             if self.live:
@@ -294,8 +308,16 @@ class Summary:
         """
 
         def hook(module, inp, out):
-            # Log here
-            # self.logs.append()
+            # Log time here
+            stop = time.time()
+
+            # Compute size
+            with self.tmp_unpatch(["size"], self.tensor_module, self.tensor_backup):
+                out_size = get_size(out)
+
+            # Count parameters
+            with self.tmp_unpatch(["dim", "unbind", "numel"], self.tensor_module, self.tensor_backup):
+                num_train_params, num_non_train_params = self.get_num_params(module)
 
             # Online summary
             if self.live:
@@ -313,13 +335,6 @@ class Summary:
                 if self.curr_module[-1] != module_name:
                     raise RuntimeError(f"Module name mismatch error: {self.curr_module[-1]} != {module_name}")
 
-                # Compute size
-                with self.tmp_unpatch(["size"], self.tensor_module, self.tensor_backup):
-                    out_size = get_size(out)
-
-                # Count parameters
-                with self.tmp_unpatch(["dim", "unbind", "numel"], self.tensor_module, self.tensor_backup):
-                    num_train_params, num_non_train_params = self.get_num_params(module)
                 self.total_num_train_params += num_train_params
                 self.total_num_non_train_params += num_non_train_params
 
@@ -363,6 +378,20 @@ class Summary:
                 self.curr_module.pop()
                 if full_module_name in self.fold_nodes:
                     self.force_hide = False
+
+            self.logs.append(
+                Log(
+                    event="end",
+                    category="module",
+                    type=module._get_name(),
+                    names=module_names,
+                    parents=module_parents,
+                    is_parent=is_parent,
+                    out_size=out_size,
+                    num_params=(num_train_params, num_non_train_params),
+                    time=stop,
+                )
+            )
 
         return hook
 
@@ -425,9 +454,6 @@ class Summary:
 
         @wraps(fn)
         def hook(*args, **kwargs):
-            # Log here
-            # self.logs.append()
-
             # Online summary
             if self.live:
                 if not self.fold:
@@ -442,11 +468,31 @@ class Summary:
                     if full_fn_name in self.fold_nodes:
                         self.force_hide = True
 
+            start = time.time()
+
+            self.logs.append(
+                Log(
+                    event="start",
+                    category="fn",
+                    type=type(fn),
+                    names=[name],
+                    parents=[],
+                    is_parent=None,
+                    out_size=None,
+                    num_params=None,
+                    time=start,
+                )
+            )
+
             # Run function here
             out = fn(*args, **kwargs)
 
             # Log here
-            # self.logs.append()
+            stop = time.time()
+
+            # Compute size
+            with self.tmp_unpatch(["size"], self.tensor_module, self.tensor_backup):
+                out_size = get_size(out)
 
             # Online summary
             if self.live:
@@ -458,10 +504,6 @@ class Summary:
 
                     if self.curr_module[-1] != name:
                         raise RuntimeError(f"Module name mismatch error: {self.curr_module[-1]} != {name}")
-
-                    # Compute size
-                    with self.tmp_unpatch(["size"], self.tensor_module, self.tensor_backup):
-                        out_size = get_size(out)
 
                     # Count parameters
                     num_train_params, num_non_train_params = (0, 0)
@@ -507,6 +549,21 @@ class Summary:
                     self.curr_module.pop()
                     if full_fn_name in self.fold_nodes:
                         self.force_hide = False
+
+            # Log results
+            self.logs.append(
+                Log(
+                    event="end",
+                    category="fn",
+                    type=type(fn),
+                    names=[name],
+                    parents=[],
+                    is_parent=None,
+                    out_size=out_size,
+                    num_params=None,
+                    time=stop,
+                )
+            )
 
             return out
 
