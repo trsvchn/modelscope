@@ -183,7 +183,7 @@ class SummaryHandler:
         if self.curr_module[-1] != module_name:
             raise RuntimeError(f"Module name mismatch error: {self.curr_module[-1]} != {module_name}")
 
-        num_train_params, num_non_train_params = num_params
+        *_, num_train_params, num_non_train_params = num_params
         self.total_num_train_params += num_train_params
         self.total_num_non_train_params += num_non_train_params
 
@@ -238,7 +238,7 @@ class SummaryHandler:
             if full_fn_name in self.fold_nodes:
                 self.force_hide = True
 
-    def fn_end(self, func_type, fn_name, out_size, num_params=(0, 0)):
+    def fn_end(self, func_type, fn_name, out_size, num_params=(0, 0, 0, 0)):
         if not self.fold:
             is_comp = True if self.state == 0 else False
             self.state = 0

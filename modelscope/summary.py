@@ -206,7 +206,7 @@ class SummaryLogger:
                      f"Non-trainable params: {self.handler.total_num_non_train_params:,}\n"
             print(footer)
 
-    def get_num_params(self, module: nn.Module) -> Tuple[int, int]:
+    def get_num_params(self, module: nn.Module) -> Tuple[int, int, int, int]:
         """Counts parameters of the module (trainable, non-trainable).
         """
         try:
@@ -217,30 +217,43 @@ class SummaryLogger:
             # Module contains params
             if param is not None:
                 # Count number of elements of Parameters
+                total_num_train_params = 0
+                total_num_non_train_params = 0
                 num_train_params = 0
                 num_non_train_params = 0
+
+                _num_train_params = param.numel()
+                _num_non_train_params = param.numel()
+                num_train_params += _num_train_params
+                num_non_train_params += _num_non_train_params
+
                 p_id = id(param)
                 if p_id not in self.param_ids:
                     self.param_ids.add(p_id)
                     if param.requires_grad:
-                        num_train_params += param.numel()
+                        total_num_train_params += _num_train_params
                     else:
-                        num_non_train_params += param.numel()
+                        total_num_non_train_params += _num_non_train_params
                 for p in params:
+                    _num_train_params = p.numel()
+                    _num_non_train_params = p.numel()
+                    num_train_params += _num_train_params
+                    num_non_train_params += _num_non_train_params
+
                     p_id = id(p)
                     if p_id not in self.param_ids:
                         self.param_ids.add(p_id)
                         if p.requires_grad:
-                            num_train_params += p.numel()
+                            total_num_train_params += _num_train_params
                         else:
-                            num_non_train_params += p.numel()
-                return num_train_params, num_non_train_params
+                            total_num_non_train_params += _num_non_train_params
+                return num_train_params, num_non_train_params, total_num_train_params, total_num_non_train_params
             else:
                 # If params empty
-                return 0, 0
+                return 0, 0, 0, 0
         except AttributeError:
             # No params at all
-            return 0, 0
+            return 0, 0, 0, 0
 
     def module_pre_forward_hook(self, module_names: List[str], module_parents: List[str], is_parent: bool) -> Callable:
         """Prepares pre forward hook.
@@ -283,7 +296,7 @@ class SummaryLogger:
 
             # Count parameters
             with self.tmp_unpatch(["dim", "unbind", "numel"], self.tensor_module, self.tensor_backup):
-                num_train_params, num_non_train_params = self.get_num_params(module)
+                num_params = self.get_num_params(module)
 
             self.logs.append(
                 Log(
@@ -294,7 +307,7 @@ class SummaryLogger:
                     parents=module_parents,
                     is_parent=is_parent,
                     out_size=out_size,
-                    num_params=(num_train_params, num_non_train_params),
+                    num_params=num_params,
                     time=stop,
                 )
             )
@@ -306,12 +319,12 @@ class SummaryLogger:
                     module_names,
                     module_parents,
                     out_size,
-                    (num_train_params, num_non_train_params),
+                    num_params,
                 )
                 if handler_out is not None:
                     if isinstance(handler_out, tuple):
                         count, module_name, module_type, out_size, num_params = handler_out
-                        num_train_params, num_non_train_params = num_params
+                        num_train_params, num_non_train_params, *_ = num_params
                         line = f"{count:<{self.col1_w}}" \
                                f"{module_name:<{self.col2_w}}" \
                                f"{module_type:<{self.col3_w}}" \
@@ -435,7 +448,7 @@ class SummaryLogger:
                 if handler_out is not None:
                     if isinstance(handler_out, tuple):
                         count, fn_name, fn_type, out_size, num_params = handler_out
-                        num_train_params, num_non_train_params = num_params
+                        num_train_params, num_non_train_params, *_ = num_params
                         line = f"{count:<{self.col1_w}}" \
                                f"{fn_name:<{self.col2_w}}" \
                                f"{fn_type:<{self.col3_w}}" \
