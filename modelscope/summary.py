@@ -1,7 +1,6 @@
 """Model Summary.
 """
 import time
-from copy import copy
 from inspect import getmembers, isfunction, isbuiltin, ismethoddescriptor, ismethod
 from contextlib import contextmanager
 from functools import wraps
@@ -12,11 +11,11 @@ import torch.nn as nn
 import torch.nn.functional
 from torch.utils.hooks import RemovableHandle
 
-from .core import Handle, Log, get_size, module_walker
-from .utils import size_to_str, adjust_module_name
+from .core import SummaryHandler, Handle, Log, get_size, module_walker
+from .utils import size_to_str
 
 
-class Summary:
+class SummaryLogger:
 
     f_ignore = [
         "adaptive_avg_pool1d",
@@ -74,13 +73,6 @@ class Summary:
         "triplet_margin_loss",
     ]
 
-    fn_types = {
-        "method_descriptor": "method",
-        "method": "method",
-        "builtin_function_or_method": "function",
-        "function": "function",
-    }
-
     def __init__(
             self,
             model,
@@ -98,19 +90,22 @@ class Summary:
             col_widths: Tuple[int, int, int, int, int, int] = (5, 25, 25, 25, 15, 15),
     ):
         self.live = live
-        self.model_name = model_name or model._get_name()
-        self.full_names = full_names
-        self.full_type_names = full_type_names
-        self.hide_names = hide_names or []
-        self.hide_types = hide_types or []
-        self.hide_types = [t.lower() for t in self.hide_types]
-        self.exclude_hidden = exclude_hidden
-        self.fold_nodes = fold_nodes or []
-        self.top_level = top_level
-        self.low_level = low_level
-        self.max_depth = max_depth
-        self.col_widths = col_widths
-        self.col1_w, self.col2_w, self.col3_w, self.col4_w, self.col5_w, self.col6_w = self.col_widths
+        if self.live:
+            self.handler = SummaryHandler(
+                [],
+                full_names,
+                full_type_names,
+                hide_names,
+                hide_types,
+                exclude_hidden,
+                fold_nodes,
+                top_level,
+                low_level,
+                max_depth,
+            )
+            self.model_name = model_name or model._get_name()
+            self.col_widths = col_widths
+            self.col1_w, self.col2_w, self.col3_w, self.col4_w, self.col5_w, self.col6_w = self.col_widths
 
         self.model = model
         self.model_backup = {}
@@ -127,21 +122,9 @@ class Summary:
         self.handles_pre_forward = {}
         self.handles_forward = {}
 
-        self.depth = -1
-        self.count = 1
-        self.state = 1
-        self.curr_module = [""]
-        self.curr_parent = [""]
-
         self.param_ids = set()
-        self.total_num_train_params = 0
-        self.total_num_non_train_params = 0
 
         self.logs = []
-
-        self.fold = False
-        self.force_hide = False
-        self.prev_is_suppressed = False
 
         for member in getmembers(self.torch_module):
             if isfunction(member[-1]) or isbuiltin(member[-1]):
@@ -194,7 +177,7 @@ class Summary:
         for k, v in self.model_backup.items():
             setattr(self.model, k, self.fn_hook(v, k))
 
-        return self.logs
+        return SummaryHandler(self.logs)
 
     def __exit__(self, exc_type, exc_value, exc_traceback):
         for k, v in self.torch_backup.items():
@@ -218,9 +201,9 @@ class Summary:
         self.handles_forward = {}
 
         if self.live:
-            footer = f"\nTotal params: {self.total_num_train_params + self.total_num_non_train_params:,}\n" \
-                     f"Trainable params: {self.total_num_train_params:,}\n" \
-                     f"Non-trainable params: {self.total_num_non_train_params:,}\n"
+            footer = f"\nTotal params: {self.handler.total_num_train_params + self.handler.total_num_non_train_params:,}\n" \
+                     f"Trainable params: {self.handler.total_num_train_params:,}\n" \
+                     f"Non-trainable params: {self.handler.total_num_non_train_params:,}\n"
             print(footer)
 
     def get_num_params(self, module: nn.Module) -> Tuple[int, int]:
@@ -282,24 +265,7 @@ class Summary:
 
             # Online summary
             if self.live:
-
-                if not self.low_level:
-                    if module._get_name() in dir(torch.nn):
-                        self.fold = True
-
-                self.depth += 1
-                if self.state == 1:
-                    self.curr_parent = copy(self.curr_module)
-                self.state = 1
-
-                curr_parent = ".".join(self.curr_parent)
-                module_name, module_parent = adjust_module_name(module_names, module_parents, curr_parent)
-
-                self.curr_module.append(module_name)
-
-                full_module_name = ".".join(self.curr_module[2:])
-                if full_module_name in self.fold_nodes:
-                    self.force_hide = True
+                self.handler.module_start(module._get_name(), module_names, module_parents)
 
         return hook
 
@@ -319,66 +285,6 @@ class Summary:
             with self.tmp_unpatch(["dim", "unbind", "numel"], self.tensor_module, self.tensor_backup):
                 num_train_params, num_non_train_params = self.get_num_params(module)
 
-            # Online summary
-            if self.live:
-                if not self.low_level:
-                    if module._get_name() in dir(torch.nn):
-                        self.fold = False
-
-                is_comp = True if self.state == 0 else False
-                self.state = 0
-
-                self.curr_parent = self.curr_module[:-1]
-                curr_parent = ".".join(self.curr_parent)
-                module_name, module_parent = adjust_module_name(module_names, module_parents, curr_parent)
-
-                if self.curr_module[-1] != module_name:
-                    raise RuntimeError(f"Module name mismatch error: {self.curr_module[-1]} != {module_name}")
-
-                self.total_num_train_params += num_train_params
-                self.total_num_non_train_params += num_non_train_params
-
-                full_module_name = ".".join(self.curr_module[2:])
-                display = (self.depth == 1) if self.top_level else (not is_comp or full_module_name in self.fold_nodes)
-
-                if display:
-                    line = None
-                    if self.depth <= self.max_depth:
-                        module_type = module._get_name()
-                        if module_type.lower() not in self.hide_types:
-                            if full_module_name not in self.hide_names:
-                                if (not self.force_hide) or (self.force_hide and is_comp):
-                                    if self.full_names:
-                                        module_name = full_module_name
-                                    else:
-                                        module_name = self.curr_module[-1]
-
-                                    line = f"{self.count:<{self.col1_w}}" \
-                                           f"{module_name:<{self.col2_w}}" \
-                                           f"{module_type:<{self.col3_w}}" \
-                                           f"{size_to_str(out_size):<{self.col4_w}}" \
-                                           f"{num_train_params:<{self.col5_w},}" \
-                                           f"{num_non_train_params:<{self.col6_w},}"
-
-                                    print(line)
-                                    self.prev_is_suppressed = False
-                                    self.count += 1
-                                else:
-                                    line = ""
-
-                    if line is None:
-                        if not self.exclude_hidden:
-                            if not self.prev_is_suppressed:
-                                line = f"{'':<{self.col1_w}}" \
-                                       f"{'...':<{self.col2_w}}"
-                                print(line)
-                                self.prev_is_suppressed = True
-
-                self.depth -= 1
-                self.curr_module.pop()
-                if full_module_name in self.fold_nodes:
-                    self.force_hide = False
-
             self.logs.append(
                 Log(
                     event="end",
@@ -392,6 +298,30 @@ class Summary:
                     time=stop,
                 )
             )
+
+            # Online summary
+            if self.live:
+                handler_out = self.handler.module_end(
+                    module._get_name(),
+                    module_names,
+                    module_parents,
+                    out_size,
+                    (num_train_params, num_non_train_params),
+                )
+                if handler_out is not None:
+                    if isinstance(handler_out, tuple):
+                        count, module_name, module_type, out_size, num_params = handler_out
+                        num_train_params, num_non_train_params = num_params
+                        line = f"{count:<{self.col1_w}}" \
+                               f"{module_name:<{self.col2_w}}" \
+                               f"{module_type:<{self.col3_w}}" \
+                               f"{size_to_str(out_size):<{self.col4_w}}" \
+                               f"{num_train_params:<{self.col5_w},}" \
+                               f"{num_non_train_params:<{self.col6_w},}"
+                        print(line)
+                    elif isinstance(handler_out, str):
+                        line = handler_out
+                        print(line)
 
         return hook
 
@@ -456,17 +386,7 @@ class Summary:
         def hook(*args, **kwargs):
             # Online summary
             if self.live:
-                if not self.fold:
-                    self.depth += 1
-                    if self.state == 1:
-                        self.curr_parent = copy(self.curr_module)
-                    self.state = 1
-
-                    self.curr_module.append(name)
-
-                    full_fn_name = ".".join(self.curr_module[2:])
-                    if full_fn_name in self.fold_nodes:
-                        self.force_hide = True
+                self.handler.fn_start(name)
 
             start = time.time()
 
@@ -494,62 +414,6 @@ class Summary:
             with self.tmp_unpatch(["size"], self.tensor_module, self.tensor_backup):
                 out_size = get_size(out)
 
-            # Online summary
-            if self.live:
-                if not self.fold:
-                    is_comp = True if self.state == 0 else False
-                    self.state = 0
-
-                    self.curr_parent = self.curr_module[:-1]
-
-                    if self.curr_module[-1] != name:
-                        raise RuntimeError(f"Module name mismatch error: {self.curr_module[-1]} != {name}")
-
-                    # Count parameters
-                    num_train_params, num_non_train_params = (0, 0)
-
-                    full_fn_name = ".".join(self.curr_module[2:])
-                    display = (self.depth == 1) if self.top_level else (not is_comp or full_fn_name in self.fold_nodes)
-
-                    if display:
-                        line = None
-                        if self.depth <= self.max_depth:
-                            fn_type = self.fn_types.get(type(fn).__name__, "unknown")
-                            if fn_type.lower() not in self.hide_types:
-                                if self.full_type_names:
-                                    fn_type = f"{fn.__name__} ({type(fn).__name__})"
-                                if full_fn_name not in self.hide_names:
-                                    if (not self.force_hide) or (self.force_hide and is_comp):
-                                        if self.full_names:
-                                            fn_name = full_fn_name
-                                        else:
-                                            fn_name = self.curr_module[-1]
-
-                                        line = f"{self.count:<{self.col1_w}}" \
-                                               f"{fn_name:<{self.col2_w}}" \
-                                               f"{fn_type:<{self.col3_w}}" \
-                                               f"{size_to_str(out_size):<{self.col4_w}}" \
-                                               f"{num_train_params:<{self.col5_w},}" \
-                                               f"{num_non_train_params:<{self.col6_w},}"
-
-                                        print(line)
-                                        self.prev_is_suppressed = False
-                                        self.count += 1
-                                    else:
-                                        line = ""
-                        if line is None:
-                            if not self.exclude_hidden:
-                                if not self.prev_is_suppressed:
-                                    line = f"{'':<{self.col1_w}}" \
-                                           f"{'...':<{self.col2_w}}"
-                                    print(line)
-                                    self.prev_is_suppressed = True
-
-                    self.depth -= 1
-                    self.curr_module.pop()
-                    if full_fn_name in self.fold_nodes:
-                        self.force_hide = False
-
             # Log results
             self.logs.append(
                 Log(
@@ -564,6 +428,24 @@ class Summary:
                     time=stop,
                 )
             )
+
+            # Online summary
+            if self.live:
+                handler_out = self.handler.fn_end(type(fn), name, out_size)
+                if handler_out is not None:
+                    if isinstance(handler_out, tuple):
+                        count, fn_name, fn_type, out_size, num_params = handler_out
+                        num_train_params, num_non_train_params = num_params
+                        line = f"{count:<{self.col1_w}}" \
+                               f"{fn_name:<{self.col2_w}}" \
+                               f"{fn_type:<{self.col3_w}}" \
+                               f"{size_to_str(out_size):<{self.col4_w}}" \
+                               f"{num_train_params:<{self.col5_w},}" \
+                               f"{num_non_train_params:<{self.col6_w},}"
+                        print(line)
+                    elif isinstance(handler_out, str):
+                        line = handler_out
+                        print(line)
 
             return out
 
