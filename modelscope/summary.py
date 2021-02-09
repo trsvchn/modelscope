@@ -78,13 +78,31 @@ class SummaryLogger:
             model: nn.Module,
             live: bool = True,
             model_name: Optional[str] = None,
+            full_names: bool = True,
+            full_type_names: bool = False,
+            hide_names: Optional[List[str]] = None,
+            hide_types: Optional[List[str]] = None,
+            exclude_hidden: bool = True,
+            fold_nodes: Optional[List[str]] = None,
+            top_level: bool = False,
+            low_level: bool = False,
+            max_depth: int = 1000,
             col_widths: Tuple[int, int, int, int, int, int] = (5, 25, 25, 25, 15, 15),
-            **kwargs,
     ):
         self.live = live
         self.model_name = model_name or model._get_name()
-        self.kwargs = kwargs
-        self.handler = SummaryHandler([], self.model_name, **self.kwargs)
+        self.handler = SummaryHandler([], self.model_name)
+        self.handler.update_attrs(
+            full_names,
+            full_type_names,
+            hide_names,
+            hide_types,
+            exclude_hidden,
+            fold_nodes,
+            top_level,
+            low_level,
+            max_depth,
+        )
         self.col_widths = col_widths
         self.col1_w, self.col2_w, self.col3_w, self.col4_w, self.col5_w, self.col6_w = self.col_widths
 
@@ -158,7 +176,7 @@ class SummaryLogger:
         for k, v in self.model_backup.items():
             setattr(self.model, k, self.fn_hook(v, k))
 
-        return SummaryHandler(self.logs, self.model_name, **self.kwargs)
+        return SummaryHandler(self.logs, self.model_name)
 
     def __exit__(self, exc_type, exc_value, exc_traceback):
         for k, v in self.torch_backup.items():
@@ -180,6 +198,33 @@ class SummaryLogger:
         for handle in self.handles_forward.values():
             handle.obj.remove()
         self.handles_forward = {}
+
+        if exc_type:
+            try:
+                error = str(exc_type.__name__)
+            except AttributeError:
+                error = str(exc_type)
+
+            self.logs.append(
+                Log(
+                    event="error",
+                    category=None,
+                    type=error,
+                    names=[str(exc_value)],
+                    parents=None,
+                    is_parent=None,
+                    out_size=None,
+                    num_params=None,
+                    time=time.time(),
+                )
+            )
+
+            if self.live:
+                line = f"{'!!!':<{self.col1_w}}" \
+                       f"{'Error':<{self.col2_w}}" \
+                       f"{error:<{self.col3_w}}" \
+                       f"{str(exc_value):<{self.col4_w}}"
+                print(line)
 
         if self.live:
             footer = f"\nTotal params: {self.handler.total_num_train_params + self.handler.total_num_non_train_params:,}\n" \
@@ -435,7 +480,7 @@ class SummaryLogger:
 
             # Online summary
             if self.live:
-                handler_out = self.handler.fn_end(type(fn), name, out_size)
+                handler_out = self.handler.fn_end(type(fn), name, out_size, None)
                 if handler_out is not None:
                     if handler_out:
                         count, fn_name, fn_type, out_size, num_params = handler_out

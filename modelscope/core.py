@@ -111,32 +111,19 @@ class SummaryHandler:
         "function": "function",
     }
 
-    def __init__(
-            self,
-            logs,
-            model_name,
-            full_names: bool = True,
-            full_type_names: bool = False,
-            hide_names: Optional[List[str]] = None,
-            hide_types: Optional[List[str]] = None,
-            exclude_hidden: bool = True,
-            fold_nodes: Optional[List[str]] = None,
-            top_level: bool = False,
-            low_level: bool = False,
-            max_depth: int = 1000,
-    ):
+    def __init__(self, logs, model_name):
         self.logs = logs
         self.model_name = model_name
-        self.full_names = full_names
-        self.full_type_names = full_type_names
-        self.hide_names = hide_names or []
-        self.hide_types = hide_types or []
-        self.hide_types = [t.lower() for t in self.hide_types]
-        self.exclude_hidden = exclude_hidden
-        self.fold_nodes = fold_nodes or []
-        self.top_level = top_level
-        self.low_level = low_level
-        self.max_depth = max_depth
+
+        self.full_names = True
+        self.full_type_names = False
+        self.hide_names = []
+        self.hide_types = []
+        self.exclude_hidden = True
+        self.fold_nodes = []
+        self.top_level = False
+        self.low_level = False
+        self.max_depth = 1000
 
         self.depth = -1
         self.count = 1
@@ -150,6 +137,43 @@ class SummaryHandler:
         self.fold = False
         self.force_hide = False
         self.prev_is_suppressed = False
+
+    def reset(self):
+        self.depth = -1
+        self.count = 1
+        self.state = 1
+        self.curr_module = [""]
+        self.curr_parent = [""]
+
+        self.total_num_train_params = 0
+        self.total_num_non_train_params = 0
+
+        self.fold = False
+        self.force_hide = False
+        self.prev_is_suppressed = False
+
+    def update_attrs(
+            self,
+            full_names: bool = True,
+            full_type_names: bool = False,
+            hide_names: Optional[List[str]] = None,
+            hide_types: Optional[List[str]] = None,
+            exclude_hidden: bool = True,
+            fold_nodes: Optional[List[str]] = None,
+            top_level: bool = False,
+            low_level: bool = False,
+            max_depth: int = 1000,
+    ):
+        self.full_names = full_names
+        self.full_type_names = full_type_names
+        self.hide_names = hide_names or []
+        self.hide_types = hide_types or []
+        self.hide_types = [t.lower() for t in self.hide_types]
+        self.exclude_hidden = exclude_hidden
+        self.fold_nodes = fold_nodes or []
+        self.top_level = top_level
+        self.low_level = low_level
+        self.max_depth = max_depth
 
     def module_start(self, module_type, module_names, module_parents):
         if not self.low_level:
@@ -239,7 +263,8 @@ class SummaryHandler:
             if full_fn_name in self.fold_nodes:
                 self.force_hide = True
 
-    def fn_end(self, func_type, fn_name, out_size, num_params=(0, 0, 0, 0)):
+    def fn_end(self, func_type, fn_name, out_size, num_params):
+        num_params = num_params or (0, 0, 0, 0)
         if not self.fold:
             is_comp = True if self.state == 0 else False
             self.state = 0
