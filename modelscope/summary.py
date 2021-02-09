@@ -322,7 +322,7 @@ class SummaryLogger:
                     num_params,
                 )
                 if handler_out is not None:
-                    if isinstance(handler_out, tuple):
+                    if handler_out:
                         count, module_name, module_type, out_size, num_params = handler_out
                         num_train_params, num_non_train_params, *_ = num_params
                         line = f"{count:<{self.col1_w}}" \
@@ -332,8 +332,9 @@ class SummaryLogger:
                                f"{num_train_params:<{self.col5_w},}" \
                                f"{num_non_train_params:<{self.col6_w},}"
                         print(line)
-                    elif isinstance(handler_out, str):
-                        line = handler_out
+                    else:
+                        line = f"{'':<{self.col1_w}}" \
+                               f"{'...':<{self.col2_w}}"
                         print(line)
 
         return hook
@@ -446,7 +447,7 @@ class SummaryLogger:
             if self.live:
                 handler_out = self.handler.fn_end(type(fn), name, out_size)
                 if handler_out is not None:
-                    if isinstance(handler_out, tuple):
+                    if handler_out:
                         count, fn_name, fn_type, out_size, num_params = handler_out
                         num_train_params, num_non_train_params, *_ = num_params
                         line = f"{count:<{self.col1_w}}" \
@@ -456,8 +457,9 @@ class SummaryLogger:
                                f"{num_train_params:<{self.col5_w},}" \
                                f"{num_non_train_params:<{self.col6_w},}"
                         print(line)
-                    elif isinstance(handler_out, str):
-                        line = handler_out
+                    else:
+                        line = f"{'':<{self.col1_w}}" \
+                               f"{'...':<{self.col2_w}}"
                         print(line)
 
             return out

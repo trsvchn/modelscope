@@ -193,6 +193,11 @@ class SummaryHandler:
 
         out = None
         if display:
+            out = out if self.exclude_hidden else False
+            out = None if self.prev_is_suppressed else out
+            if out is False:
+                self.prev_is_suppressed = True
+
             if self.depth <= self.max_depth:
                 if module_type.lower() not in self.hide_types:
                     if full_module_name not in self.hide_names:
@@ -211,12 +216,6 @@ class SummaryHandler:
                             )
                             self.prev_is_suppressed = False
                             self.count += 1
-
-        # if out is None:
-        #     if not self.exclude_hidden:
-        #         if not self.prev_is_suppressed:
-        #             out = "..."
-        #             self.prev_is_suppressed = True
 
         self.depth -= 1
         self.curr_module.pop()
@@ -255,6 +254,11 @@ class SummaryHandler:
 
             out = None
             if display:
+                out = out if self.exclude_hidden else False
+                out = None if self.prev_is_suppressed else out
+                if out is False:
+                    self.prev_is_suppressed = True
+
                 if self.depth <= self.max_depth:
                     fn_type = self.fn_types.get(func_type.__name__, "unknown")
                     if fn_type.lower() not in self.hide_types:
@@ -276,12 +280,6 @@ class SummaryHandler:
                                 )
                                 self.prev_is_suppressed = False
                                 self.count += 1
-
-            # if out is None:
-            #     if not self.exclude_hidden:
-            #         if not self.prev_is_suppressed:
-            #             out = "..."
-            #             self.prev_is_suppressed = True
 
             self.depth -= 1
             self.curr_module.pop()
