@@ -1,6 +1,7 @@
 """Core module.
 """
 import operator as op
+import string
 from copy import copy
 from collections import namedtuple
 from functools import reduce
@@ -10,7 +11,7 @@ from typing import Tuple, List, Generator, Union, Optional
 import torch
 import torch.nn as nn
 
-from .utils import adjust_module_name
+from .utils import adjust_module_name, size_to_str
 
 Module = namedtuple("Module", "name obj parent is_parent")
 Handle = namedtuple("Handle", "obj module names parents is_parent")
@@ -331,3 +332,86 @@ class SummaryHandler:
                     yield self.fn_end(log.type, log.names[0], log.out_size, log.num_params)
             elif log.event == "error":
                 yield None, log.names[0], log.type, log.out_size, log.num_params
+
+    def keras_like(
+            self,
+            display=True,
+            full_names: bool = True,
+            full_type_names: bool = False,
+            hide_names: Optional[List[str]] = None,
+            hide_types: Optional[List[str]] = None,
+            exclude_hidden: bool = True,
+            fold_nodes: Optional[List[str]] = None,
+            top_level: bool = False,
+            low_level: bool = False,
+            max_depth: int = 1000,
+            col_widths: Tuple[int, int, int] = (30, 20, 15),
+    ):
+        """Keras-like model summary with additional options.
+        """
+        col1_w, col2_w, col3_w = col_widths
+        self.update_attrs(
+            full_names,
+            full_type_names,
+            hide_names,
+            hide_types,
+            exclude_hidden,
+            fold_nodes,
+            top_level,
+            low_level,
+            max_depth,
+        )
+
+        intro = string.Template("Model: \"${model_name}\"\n")
+        header = f"{'Layer (type)':<{col1_w}}{'Output Shape':<{col2_w}}{'Param #':<{col3_w}}\n"
+        line_sep_reg = f"{'_' * sum(col_widths)}\n"
+        line_sep_bold = f"{'=' * sum(col_widths)}\n"
+        footer = string.Template(
+            "Total params: ${total_num_params}\n"
+            "Trainable params: ${total_num_train_params}\n"
+            "Non-trainable params: ${total_num_non_train_params}\n"
+        )
+        line = string.Template("${layer}${out_size}${num_params}\n")
+
+        summary_string = ""
+
+        summary_string += intro.substitute(model_name=self.model_name)
+        summary_string += line_sep_reg
+        summary_string += header
+
+        for i, log in enumerate(filter(lambda x: x is not None, self.log_walker())):
+            summary_string += line_sep_reg if i != 0 else line_sep_bold
+            if log:
+                count, node_name, node_type, out_size, num_params = log
+                if count:
+                    num_train_params, num_non_train_params, *_ = num_params
+                    summary_string += line.substitute(
+                        layer=f"{node_name + ' ' + '(' + node_type + ')':<{col1_w}}",
+                        out_size=f"{size_to_str(out_size, parenthesis=True):<{col2_w}}",
+                        num_params=f"{num_train_params + num_non_train_params:<{col3_w},}",
+                    )
+                else:
+                    summary_string += line.substitute(
+                        layer=f"{'Error' + ' ' + '(' + node_type + ')':<{col1_w}}",
+                        out_size=f"{node_name:<{col2_w}}",
+                        num_params=f"{'':<{col3_w}}",
+                    )
+            else:
+                summary_string += line.substitute(
+                    layer=f"{'...':<{col1_w}}",
+                    out_size=f"{'':<{col2_w}}",
+                    num_params=f"{'':<{col3_w}}",
+                )
+
+        summary_string += line_sep_bold
+        summary_string += footer.substitute(
+            total_num_params=f"{self.total_num_train_params + self.total_num_non_train_params:,}",
+            total_num_train_params=f"{self.total_num_train_params:,}",
+            total_num_non_train_params=f"{self.total_num_non_train_params:,}",
+        )
+        summary_string += line_sep_reg
+
+        if display:
+            print(summary_string)
+
+        return summary_string
