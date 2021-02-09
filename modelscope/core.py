@@ -114,6 +114,7 @@ class SummaryHandler:
     def __init__(
             self,
             logs,
+            model_name,
             full_names: bool = True,
             full_type_names: bool = False,
             hide_names: Optional[List[str]] = None,
@@ -125,6 +126,7 @@ class SummaryHandler:
             max_depth: int = 1000,
     ):
         self.logs = logs
+        self.model_name = model_name
         self.full_names = full_names
         self.full_type_names = full_type_names
         self.hide_names = hide_names or []
