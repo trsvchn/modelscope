@@ -221,32 +221,41 @@ class SummaryLogger:
                 total_num_non_train_params = 0
                 num_train_params = 0
                 num_non_train_params = 0
+                _num_train_params = 0
+                _num_non_train_params = 0
 
-                _num_train_params = param.numel()
-                _num_non_train_params = param.numel()
+                if param.requires_grad:
+                    _num_train_params = param.numel()
+                else:
+                    _num_non_train_params = param.numel()
+
                 num_train_params += _num_train_params
                 num_non_train_params += _num_non_train_params
 
                 p_id = id(param)
                 if p_id not in self.param_ids:
                     self.param_ids.add(p_id)
-                    if param.requires_grad:
-                        total_num_train_params += _num_train_params
-                    else:
-                        total_num_non_train_params += _num_non_train_params
+                    total_num_train_params += _num_train_params
+                    total_num_non_train_params += _num_non_train_params
+
                 for p in params:
-                    _num_train_params = p.numel()
-                    _num_non_train_params = p.numel()
+                    _num_train_params = 0
+                    _num_non_train_params = 0
+
+                    if param.requires_grad:
+                        _num_train_params = p.numel()
+                    else:
+                        _num_non_train_params = p.numel()
+
                     num_train_params += _num_train_params
                     num_non_train_params += _num_non_train_params
 
                     p_id = id(p)
                     if p_id not in self.param_ids:
                         self.param_ids.add(p_id)
-                        if p.requires_grad:
-                            total_num_train_params += _num_train_params
-                        else:
-                            total_num_non_train_params += _num_non_train_params
+                        total_num_train_params += _num_train_params
+                        total_num_non_train_params += _num_non_train_params
+
                 return num_train_params, num_non_train_params, total_num_train_params, total_num_non_train_params
             else:
                 # If params empty
