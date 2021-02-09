@@ -313,3 +313,21 @@ class SummaryHandler:
             if full_fn_name in self.fold_nodes:
                 self.force_hide = False
             return out
+
+    def log_walker(self):
+        """Iterates over logs.
+        """
+        self.reset()
+        for log in self.logs:
+            if log.event == "start":
+                if log.category == "module":
+                    yield self.module_start(log.type, log.names, log.parents)
+                elif log.category == "fn":
+                    yield self.fn_start(log.names[0])
+            elif log.event == "end":
+                if log.category == "module":
+                    yield self.module_end(log.type, log.names, log.parents, log.out_size, log.num_params)
+                elif log.category == "fn":
+                    yield self.fn_end(log.type, log.names[0], log.out_size, log.num_params)
+            elif log.event == "error":
+                yield None, log.names[0], log.type, log.out_size, log.num_params
